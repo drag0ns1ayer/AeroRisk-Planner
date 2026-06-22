@@ -61,7 +61,7 @@ class PlannerSmokeTests(unittest.TestCase):
         self.mapm = MapManager(self.cfg)
         # 创建一个总是返回零风的简单风模型
         class ZeroWind(BaseWindModel):
-            def get_wind(self, x, y, z, terrain_gradient, z0):
+            def get_wind(self, x, y, z, terrain_gradient, z0, t_s=0.0):
                 return np.array([0.0, 0.0])
 
         self.wind = ZeroWind()
@@ -88,7 +88,8 @@ class PlannerSmokeTests(unittest.TestCase):
         cx, cy = self.start
         wind = self.est.get_wind(cx, cy, 10.0)
         self.assertEqual(wind.shape, (2,))
-        risk = self.est.get_risk(cx, cy)
+        z = self.est.get_altitude(cx, cy) + self.cfg.takeoff_altitude_agl
+        risk, _ = self.est.get_risk(cx, cy, z, v_ground=self.cfg.drone_speed)
         self.assertIsInstance(risk, float)
         self.assertGreaterEqual(risk, 0.0)
     def test_nonempty_path(self):

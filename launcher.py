@@ -229,6 +229,8 @@ Examples:
   python launcher.py ui
   python launcher.py desktop
   python launcher.py swarm
+  python launcher.py astar25
+  python launcher.py rl25
   python launcher.py showcase
   python launcher.py ablation --exp all
   python launcher.py ablation --exp control --control-seeds 10
@@ -241,7 +243,7 @@ Examples:
     )
     parser.add_argument(
         "mode",
-        choices=["sim", "rl", "ui", "desktop", "swarm", "showcase", "ablation", "ablation_parallel", "test", "install"],
+        choices=["sim", "rl", "rl25", "ui", "desktop", "swarm", "astar25", "showcase", "ablation", "ablation_parallel", "test", "install"],
         help="launch target",
     )
     parser.add_argument("--timesteps", type=int, default=500000, help="RL training timesteps")
@@ -262,7 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     success = False
     if args.mode == "install":
         success = run_command(
-            [sys.executable, "-m", "pip", "install", "-r", "requirements_rl_ui.txt"],
+            [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
             "Install project dependencies",
         )
     elif args.mode == "sim":
@@ -271,6 +273,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         success = run_command(
             [sys.executable, "rl_training/train_ppo.py"],
             f"Run RL training (timesteps={args.timesteps}, envs={args.envs})",
+        )
+    elif args.mode == "rl25":
+        success = run_command(
+            [sys.executable, "v25/train_rl_disruptive.py", *args.extra],
+            "Run RL v2.5 (A* teacher + disruptive execution)",
         )
     elif args.mode == "ui":
         success = run_ui()
@@ -281,8 +288,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif args.mode == "swarm":
         success = run_command(
-            [sys.executable, "test_swarm_standalone.py"],
+            [sys.executable, "experiments/test_swarm_standalone.py"],
             "Run four-case swarm matrix (A*/RL x clean/gust)",
+        )
+    elif args.mode == "astar25":
+        success = run_command(
+            [sys.executable, "v25/experiments/single_astar_disruptive.py", *args.extra],
+            "Run single-drone A* with disruptive execution disturbances",
         )
     elif args.mode == "showcase":
         success = run_command(

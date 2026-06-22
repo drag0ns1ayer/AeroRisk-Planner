@@ -1,13 +1,6 @@
-from configs.config import SimulationConfig
-from environment.map_manager import MapManager
+from experiments.check_coords import main
 
-config = SimulationConfig()
-map_manager = MapManager(config)
 
-print("bounds:", map_manager.get_bounds())
-print("center:", (0.0, 0.0))
+if __name__ == "__main__":
+    main()
 
-try:
-    print("alt(center):", map_manager.get_altitude(0.0, 0.0))
-except Exception as e:
-    print("alt(center) error:", e)

@@ -24,6 +24,18 @@ Thumbs.db
 *.gif
 *.mp4
 mission_comparison.png
+temp_uploaded_map.png
+
+# Runtime artifacts
+logs/
+results/
+mission_outputs/
+v25/artifacts/
+
+# Training artifacts
+models/ppo_*/
+models/*_eval/
+*.tfevents.*
 
 # PyInstaller artifacts
 build/

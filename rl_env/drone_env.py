@@ -58,7 +58,10 @@ class GuidedDroneEnv(gym.Env):
         self.energy_remaining = float(self.config.battery_capacity_j)
         self.current_step = 0
         
-        self.max_steps = self.config.rl_max_steps
+        if self.config.curriculum_stage >= 4:
+            self.max_steps = self.config.rl_max_steps_stage4
+        else:
+            self.max_steps = self.config.rl_max_steps
         self.dt = self.config.rl_dt
 
         self.global_astar_path = []
@@ -312,8 +315,10 @@ class GuidedDroneEnv(gym.Env):
             nfz_low, nfz_high = self.config.rl_nfz_count_stage1_min, self.config.rl_nfz_count_stage1_max
         elif self.config.curriculum_stage == 2:
             nfz_low, nfz_high = self.config.rl_nfz_count_stage2_min, self.config.rl_nfz_count_stage2_max
-        else:
+        elif self.config.curriculum_stage == 3:
             nfz_low, nfz_high = self.config.rl_nfz_count_stage3_min, self.config.rl_nfz_count_stage3_max
+        else:
+            nfz_low, nfz_high = self.config.rl_nfz_count_stage4_min, self.config.rl_nfz_count_stage4_max
 
         self.episode_nfz_list_km = []
         for _ in range(int(rng.integers(nfz_low, nfz_high + 1))):
@@ -377,9 +382,12 @@ class GuidedDroneEnv(gym.Env):
             elif self.config.curriculum_stage == 2:
                 goal_min, goal_max = self.config.rl_goal_min_stage2_m, self.config.rl_goal_max_stage2_m
                 max_teacher_len = self.config.rl_teacher_len_stage2_max
-            else:
+            elif self.config.curriculum_stage == 3:
                 goal_min, goal_max = self.config.rl_goal_min_stage3_m, self.config.rl_goal_max_stage3_m
                 max_teacher_len = self.config.rl_teacher_len_stage3_max
+            else:
+                goal_min, goal_max = self.config.rl_goal_min_stage4_m, self.config.rl_goal_max_stage4_m
+                max_teacher_len = self.config.rl_teacher_len_stage4_max
 
             valid_plan = False
 
@@ -438,6 +446,9 @@ class GuidedDroneEnv(gym.Env):
                     continue
 
                 if self.config.curriculum_stage == 2 and path_total_len > self.config.rl_stage2_path_len_max_m:
+                    continue
+                
+                if self.config.curriculum_stage >= 4 and path_total_len > self.config.rl_stage4_path_len_max_m:
                     continue
 
                 if 10 <= len(self.global_astar_path) <= max_teacher_len:
@@ -633,8 +644,10 @@ class GuidedDroneEnv(gym.Env):
                 required_progress = self.config.rl_required_progress_stage1_m
             elif self.config.curriculum_stage == 2:
                 required_progress = self.config.rl_required_progress_stage2_m
-            else:
+            elif self.config.curriculum_stage == 3:
                 required_progress = self.config.rl_required_progress_stage3_m
+            else:
+                required_progress = self.config.rl_required_progress_stage4_m
 
             if progress < required_progress:
                 reward -= self.config.rl_no_progress_penalty

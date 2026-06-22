@@ -267,6 +267,8 @@ class SimulationConfig:
     rl_goal_max_stage2_m: float = 3400.0
     rl_goal_min_stage3_m: float = 3000.0
     rl_goal_max_stage3_m: float = 5000.0
+    rl_goal_min_stage4_m: float = 5000.0
+    rl_goal_max_stage4_m: float = 8500.0
 
     rl_nfz_count_stage1_min: int = 0
     rl_nfz_count_stage1_max: int = 2
@@ -274,13 +276,18 @@ class SimulationConfig:
     rl_nfz_count_stage2_max: int = 3
     rl_nfz_count_stage3_min: int = 1
     rl_nfz_count_stage3_max: int = 4
+    rl_nfz_count_stage4_min: int = 2
+    rl_nfz_count_stage4_max: int = 6
 
     rl_teacher_len_stage1_max: int = 35
     rl_teacher_len_stage2_max: int = 60
     rl_teacher_len_stage3_max: int = 200
+    rl_teacher_len_stage4_max: int = 320
 
     rl_stage1_path_len_max_m: float = 2600.0
     rl_stage2_path_len_max_m: float = 4200.0
+    rl_stage4_path_len_max_m: float = 11000.0
+    rl_max_steps_stage4: int = 900
 
     rl_spawn_margin_m: float = 1000.0
     rl_goal_margin_m: float = 500.0
@@ -305,11 +312,107 @@ class SimulationConfig:
     rl_required_progress_stage1_m: float = 15.0
     rl_required_progress_stage2_m: float = 35.0
     rl_required_progress_stage3_m: float = 70.0
+    rl_required_progress_stage4_m: float = 105.0
 
     rl_progress_check_interval: int = 75
     rl_overload_power_ratio: float = 1.05
     rl_terminate_risk_threshold: float = 0.55
     rl_enable_apas: bool = False
+    v25_apas_use_disruption: bool = True
+    v25_apas_heading_offsets_deg: Tuple[float, ...] = (
+        0.0, 15.0, -15.0, 30.0, -30.0, 45.0, -45.0, 60.0, -60.0, 90.0, -90.0
+    )
+    v25_apas_speed_decrement_mps: float = 2.0
+    v25_apas_agl_increments_m: Tuple[float, ...] = (0.0, 30.0, 60.0)
+    v25_expert_heading_actions: Tuple[float, ...] = (-0.65, -0.35, 0.0, 0.35, 0.65)
+    v25_expert_speed_actions: Tuple[float, ...] = (-0.25, 0.0, 0.35)
+    v25_expert_agl_actions: Tuple[float, ...] = (0.0, 0.45)
+    v25_expert_rollout_horizon: int = 3
+    v25_expert_rollout_decay: float = 0.72
+    v25_expert_activation_hazard: float = 0.18
+    v25_expert_risk_gain: float = 12.0
+    v25_expert_core_penalty: float = 90.0
+    v25_expert_hard_constraint_penalty: float = 1000000.0
+    v25_expert_progress_gain: float = 0.085
+    v25_expert_path_error_gain: float = 0.0035
+    v25_expert_final_path_error_gain: float = 0.008
+    v25_expert_final_progress_gain: float = 0.10
+    v25_expert_power_gain: float = 0.00015
+    v25_expert_action_gain: float = 0.060
+    v25_segment_probe_samples: int = 16
+    v25_expert_hard_risk_threshold: float = 0.55
+    v25_expert_risk_improvement_threshold: float = 0.08
+    v25_expert_recovery_path_error_m: float = 650.0
+    v25_expert_emergency_heading_actions: Tuple[float, ...] = (-1.0, -0.75, 0.75, 1.0)
+    v25_expert_emergency_speed_actions: Tuple[float, ...] = (-1.0, -0.75, -0.50)
+    v25_expert_emergency_agl_actions: Tuple[float, ...] = (0.0, 1.0)
+
+    # v2.5 disruptive-reward tuning: bias RL toward low energy and low time while keeping risk control.
+    v25_reward_power_saving_gain: float = 0.00014
+    v25_reward_risk_gain: float = 0.65
+    v25_reward_progress_gain: float = 0.0035
+    v25_reward_excess_power_penalty_gain: float = 0.00010
+    v25_reward_slow_progress_penalty_gain: float = 0.0030
+    v25_reward_step_time_penalty_gain: float = 0.0010
+    v25_detour_penalty_threshold_m: float = 900.0
+    v25_detour_penalty_gain: float = 0.0022
+
+    # v2.5 disruption scaling: strengthen disturbances moderately without becoming unrealistic.
+    v25_disruption_storm_strength_scale: float = 1.12
+    v25_disruption_pulse_strength_scale: float = 1.10
+    v25_disruption_storm_radius_scale: float = 1.05
+    v25_disruption_pulse_radius_scale: float = 1.06
+    v25_disruption_risk_bonus_scale: float = 0.30
+
+    # v2.5 true-world execution and sensor model.
+    v25_max_turn_rate_deg_s: float = 18.0
+    v25_max_accel_mps2: float = 2.5
+    v25_max_climb_rate_mps: float = 8.0
+    v25_max_descent_rate_mps: float = 7.0
+    v25_sensor_wind_noise_std_mps: float = 0.35
+    v25_sensor_risk_noise_std: float = 0.01
+    v25_sensor_scan_distance_m: float = 650.0
+    v25_sensor_mode: str = "circle_oracle"
+    v25_radar_radius_m: float = 1400.0
+    v25_radar_sectors: int = 8
+    v25_circle_oracle_samples: int = 96
+    v25_disruption_stress_level: str = "normal"
+    v25_local_wind_region_count_min: int = 2
+    v25_local_wind_region_count_max: int = 4
+    v25_local_wind_radius_range_m: Tuple[float, float] = (600.0, 1200.0)
+    v25_local_wind_peak_range_mps: Tuple[float, float] = (4.0, 9.0)
+    v25_local_wind_risk_bonus_max: float = 0.08
+    v25_destructive_storm_radius_range_m: Tuple[float, float] = (450.0, 900.0)
+    v25_destructive_storm_probability: float = 0.50
+    v25_destructive_storm_core_ratio_range: Tuple[float, float] = (0.35, 0.50)
+    v25_destructive_storm_halo_ratio_range: Tuple[float, float] = (0.68, 0.86)
+    v25_destructive_storm_halo_danger_floor: float = 0.45
+    v25_destructive_storm_wind_range_mps: Tuple[float, float] = (5.0, 11.0)
+    v25_destructive_storm_outer_risk_range: Tuple[float, float] = (0.05, 0.20)
+    v25_destructive_storm_core_risk_range: Tuple[float, float] = (0.60, 1.00)
+    v25_destructive_storm_core_crash: bool = True
+    v25_reward_progress_gain_true: float = 0.016
+    v25_reward_forward_progress_gain_true: float = 0.006
+    v25_reward_path_error_gain_true: float = 0.0004
+    v25_reward_energy_gain_true: float = 0.00004
+    v25_reward_risk_gain_true: float = 2.5
+    v25_reward_residual_gain_true: float = 0.010
+    v25_reward_calm_residual_gain_true: float = 0.080
+    v25_reward_action_smoothness_gain_true: float = 0.025
+    v25_reward_unproductive_residual_gain_true: float = 0.12
+    v25_reward_unproductive_speed_gain_true: float = 0.035
+    v25_reward_min_progress_m_true: float = 6.0
+    v25_reward_apas_intervention_penalty_true: float = 0.08
+    v25_reward_local_hazard_gain_true: float = 0.55
+    v25_goal_reward_true: float = 35.0
+    v25_residual_gate_min_scale: float = 0.28
+    v25_residual_gate_power: float = 1.1
+    v25_intervention_wind_scale_mps: float = 6.0
+    v25_intervention_tracking_scale_mps: float = 10.0
+    v25_intervention_path_scale_m: float = 600.0
+    v25_intervention_hazard_gain: float = 0.35
+    v25_collision_penalty_true: float = 45.0
+    v25_timeout_penalty_true: float = 25.0
 
     def __post_init__(self):
         """验证配置参数的合法性，防止非法值导致运行时错误"""
@@ -380,6 +483,145 @@ class SimulationConfig:
         # 目标容差验证
         if self.goal_tolerance_3d_m < 0 or self.goal_tolerance_xy_m < 0 or self.goal_tolerance_z_m < 0:
             raise ValueError(f"goal tolerances cannot be negative")
+
+        # v2.5 reward/disruption tuning validation
+        if self.v25_reward_power_saving_gain < 0:
+            raise ValueError(f"v25_reward_power_saving_gain must be >= 0, got {self.v25_reward_power_saving_gain}")
+        if self.v25_reward_risk_gain < 0:
+            raise ValueError(f"v25_reward_risk_gain must be >= 0, got {self.v25_reward_risk_gain}")
+        if self.v25_reward_progress_gain < 0:
+            raise ValueError(f"v25_reward_progress_gain must be >= 0, got {self.v25_reward_progress_gain}")
+        if self.v25_reward_excess_power_penalty_gain < 0:
+            raise ValueError(
+                "v25_reward_excess_power_penalty_gain must be >= 0, "
+                f"got {self.v25_reward_excess_power_penalty_gain}"
+            )
+        if self.v25_reward_slow_progress_penalty_gain < 0:
+            raise ValueError(
+                "v25_reward_slow_progress_penalty_gain must be >= 0, "
+                f"got {self.v25_reward_slow_progress_penalty_gain}"
+            )
+        if self.v25_reward_step_time_penalty_gain < 0:
+            raise ValueError(
+                f"v25_reward_step_time_penalty_gain must be >= 0, got {self.v25_reward_step_time_penalty_gain}"
+            )
+        if self.v25_detour_penalty_threshold_m < 0:
+            raise ValueError(
+                f"v25_detour_penalty_threshold_m must be >= 0, got {self.v25_detour_penalty_threshold_m}"
+            )
+        if self.v25_detour_penalty_gain < 0:
+            raise ValueError(f"v25_detour_penalty_gain must be >= 0, got {self.v25_detour_penalty_gain}")
+        if self.v25_disruption_storm_strength_scale <= 0:
+            raise ValueError(
+                "v25_disruption_storm_strength_scale must be > 0, "
+                f"got {self.v25_disruption_storm_strength_scale}"
+            )
+        if self.v25_disruption_pulse_strength_scale <= 0:
+            raise ValueError(
+                "v25_disruption_pulse_strength_scale must be > 0, "
+                f"got {self.v25_disruption_pulse_strength_scale}"
+            )
+        if self.v25_disruption_storm_radius_scale <= 0:
+            raise ValueError(
+                f"v25_disruption_storm_radius_scale must be > 0, got {self.v25_disruption_storm_radius_scale}"
+            )
+        if self.v25_disruption_pulse_radius_scale <= 0:
+            raise ValueError(
+                f"v25_disruption_pulse_radius_scale must be > 0, got {self.v25_disruption_pulse_radius_scale}"
+            )
+        if self.v25_disruption_risk_bonus_scale < 0:
+            raise ValueError(
+                f"v25_disruption_risk_bonus_scale must be >= 0, got {self.v25_disruption_risk_bonus_scale}"
+            )
+        if self.v25_max_turn_rate_deg_s <= 0 or self.v25_max_accel_mps2 <= 0:
+            raise ValueError("v25 turn-rate and acceleration limits must be > 0")
+        if self.v25_max_climb_rate_mps <= 0 or self.v25_max_descent_rate_mps <= 0:
+            raise ValueError("v25 vertical-rate limits must be > 0")
+        if self.v25_sensor_wind_noise_std_mps < 0 or self.v25_sensor_risk_noise_std < 0:
+            raise ValueError("v25 sensor noise values must be >= 0")
+        if self.v25_sensor_scan_distance_m <= 0:
+            raise ValueError("v25_sensor_scan_distance_m must be > 0")
+        if self.v25_sensor_mode not in {"sector_radar", "circle_oracle"}:
+            raise ValueError("v25_sensor_mode must be one of: sector_radar, circle_oracle")
+        if self.v25_radar_radius_m <= 0 or self.v25_radar_sectors <= 0:
+            raise ValueError("v25 radar radius and sectors must be > 0")
+        if self.v25_circle_oracle_samples < 8:
+            raise ValueError("v25_circle_oracle_samples must be >= 8")
+        if self.v25_disruption_stress_level not in {"normal", "hard", "extreme", "fragile"}:
+            raise ValueError("v25_disruption_stress_level must be one of: normal, hard, extreme, fragile")
+        if self.v25_local_wind_region_count_min < 0:
+            raise ValueError("v25 local wind region count cannot be negative")
+        if self.v25_local_wind_region_count_max < self.v25_local_wind_region_count_min:
+            raise ValueError("v25 local wind region count range is invalid")
+        if not (0.0 <= self.v25_destructive_storm_probability <= 1.0):
+            raise ValueError("v25_destructive_storm_probability must be in [0, 1]")
+        if not (0.0 <= self.v25_destructive_storm_halo_danger_floor <= 1.0):
+            raise ValueError("v25_destructive_storm_halo_danger_floor must be in [0, 1]")
+        if min(
+            self.v25_intervention_wind_scale_mps,
+            self.v25_intervention_tracking_scale_mps,
+            self.v25_intervention_path_scale_m,
+        ) <= 0:
+            raise ValueError("v25 intervention scales must be > 0")
+        if min(
+            self.v25_reward_residual_gain_true,
+            self.v25_reward_forward_progress_gain_true,
+            self.v25_reward_calm_residual_gain_true,
+            self.v25_reward_action_smoothness_gain_true,
+            self.v25_reward_unproductive_residual_gain_true,
+            self.v25_reward_unproductive_speed_gain_true,
+            self.v25_reward_min_progress_m_true,
+            self.v25_reward_apas_intervention_penalty_true,
+            self.v25_reward_local_hazard_gain_true,
+            self.v25_goal_reward_true,
+            self.v25_residual_gate_min_scale,
+            self.v25_residual_gate_power,
+            self.v25_intervention_hazard_gain,
+            self.v25_collision_penalty_true,
+            self.v25_timeout_penalty_true,
+        ) < 0:
+            raise ValueError("v25 residual reward and terminal penalties must be >= 0")
+        if self.v25_intervention_hazard_gain > 1.0:
+            raise ValueError("v25_intervention_hazard_gain must be in [0, 1]")
+        if self.v25_residual_gate_min_scale > 1.0:
+            raise ValueError("v25_residual_gate_min_scale must be in [0, 1]")
+        if self.v25_apas_speed_decrement_mps <= 0:
+            raise ValueError("v25_apas_speed_decrement_mps must be > 0")
+        if not self.v25_apas_heading_offsets_deg or not self.v25_apas_agl_increments_m:
+            raise ValueError("v25 APAS candidate lists must not be empty")
+        if not self.v25_expert_heading_actions or not self.v25_expert_speed_actions or not self.v25_expert_agl_actions:
+            raise ValueError("v25 expert candidate lists must not be empty")
+        if self.v25_expert_rollout_horizon < 1:
+            raise ValueError("v25_expert_rollout_horizon must be >= 1")
+        if not (0.0 <= self.v25_expert_rollout_decay <= 1.0):
+            raise ValueError("v25_expert_rollout_decay must be in [0, 1]")
+        if self.v25_segment_probe_samples < 1:
+            raise ValueError("v25_segment_probe_samples must be >= 1")
+        if not (0.0 <= self.v25_expert_hard_risk_threshold <= 1.0):
+            raise ValueError("v25_expert_hard_risk_threshold must be in [0, 1]")
+        if not (0.0 <= self.v25_expert_risk_improvement_threshold <= 1.0):
+            raise ValueError("v25_expert_risk_improvement_threshold must be in [0, 1]")
+        if self.v25_expert_recovery_path_error_m < 0:
+            raise ValueError("v25_expert_recovery_path_error_m must be >= 0")
+        if (
+            not self.v25_expert_emergency_heading_actions
+            or not self.v25_expert_emergency_speed_actions
+            or not self.v25_expert_emergency_agl_actions
+        ):
+            raise ValueError("v25 expert emergency candidate lists must not be empty")
+        if min(
+            self.v25_expert_risk_gain,
+            self.v25_expert_core_penalty,
+            self.v25_expert_hard_constraint_penalty,
+            self.v25_expert_progress_gain,
+            self.v25_expert_path_error_gain,
+            self.v25_expert_final_path_error_gain,
+            self.v25_expert_final_progress_gain,
+            self.v25_expert_power_gain,
+            self.v25_expert_action_gain,
+            self.v25_expert_activation_hazard,
+        ) < 0:
+            raise ValueError("v25 expert scoring gains must be >= 0")
         
         logger.debug(f"✓ Config validated: drone_speed={self.drone_speed}m/s, battery={self.battery_capacity_j/1e6:.1f}MJ")
 

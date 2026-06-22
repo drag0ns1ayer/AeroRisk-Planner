@@ -1,0 +1,8 @@
+{
+    "idf.customExtraVars": {},
+    "idf.currentSetup": "F:\\esp\\v5.5.4\\esp-idf",
+    "idf.openOcdConfigs": [
+        "board/esp32s2-kaluga-1.cfg"
+    ],
+    "idf.flashType": "UART"
+}
