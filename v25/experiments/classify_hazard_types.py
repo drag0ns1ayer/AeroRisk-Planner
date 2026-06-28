@@ -109,6 +109,27 @@ def _summarize(classified_rows: list[dict]) -> dict:
     for row in classified_rows:
         by_method[str(row["method"])].append(row)
 
+    metric_fields = (
+        "steps",
+        "expert_normal_steps",
+        "expert_cautious_steps",
+        "expert_cautious_trend_steps",
+        "expert_avoiding_steps",
+        "expert_emergency_steps",
+        "expert_recovering_steps",
+        "expert_rejoin_actions",
+        "expert_rejoin_attempts",
+        "expert_rejoin_rejected",
+    )
+
+    def mean_metrics(rows: list[dict]) -> dict:
+        if not rows:
+            return {f"{field}_mean": 0.0 for field in metric_fields}
+        return {
+            f"{field}_mean": sum(float(row.get(field, 0.0)) for row in rows) / max(len(rows), 1)
+            for field in metric_fields
+        }
+
     method_summaries = {}
     for method, rows in sorted(by_method.items()):
         n = max(len(rows), 1)
@@ -121,6 +142,7 @@ def _summarize(classified_rows: list[dict]) -> dict:
                 "episodes": len(sub),
                 "success_rate": sum(1 for row in sub if bool(row["success"])) / max(len(sub), 1),
                 "terminated_reasons": dict(Counter(str(row["terminated_reason"]) for row in sub)),
+                **mean_metrics(sub),
             }
         method_summaries[method] = {
             "episodes": len(rows),
@@ -128,6 +150,7 @@ def _summarize(classified_rows: list[dict]) -> dict:
             "class_counts": dict(class_counts),
             "class_rates": {key: value / n for key, value in class_counts.items()},
             "terminated_reasons": dict(reason_counts),
+            **mean_metrics(rows),
             "by_class": class_success,
         }
     return method_summaries
@@ -199,6 +222,15 @@ def main() -> int:
                 "success": bool(run_summary["success"]),
                 "terminated_reason": str(run_summary["terminated_reason"]),
                 "steps": int(run_summary["steps"]),
+                "expert_normal_steps": int(run_summary.get("expert_normal_steps", 0)),
+                "expert_cautious_steps": int(run_summary.get("expert_cautious_steps", 0)),
+                "expert_cautious_trend_steps": int(run_summary.get("expert_cautious_trend_steps", 0)),
+                "expert_avoiding_steps": int(run_summary.get("expert_avoiding_steps", 0)),
+                "expert_emergency_steps": int(run_summary.get("expert_emergency_steps", 0)),
+                "expert_recovering_steps": int(run_summary.get("expert_recovering_steps", 0)),
+                "expert_rejoin_actions": int(run_summary.get("expert_rejoin_actions", 0)),
+                "expert_rejoin_attempts": int(run_summary.get("expert_rejoin_attempts", 0)),
+                "expert_rejoin_rejected": int(run_summary.get("expert_rejoin_rejected", 0)),
                 **classification,
             }
             classified_rows.append(row)

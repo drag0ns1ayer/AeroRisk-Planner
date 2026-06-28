@@ -195,11 +195,11 @@ class AStarPlanner:
         arrival_dist_xy = self.step_size
         arrival_dist_z = self.z_step
 
-      # 🌟 优化日志输出：完整打印起终点的 3D 坐标 (X, Y, Z)
+        # Keep planner logs ASCII-safe for Windows GBK consoles and test runners.
         print(
-            f"🚀 4D 时空搜索启动 | 起飞时间: T={start_time_s:.1f}s\n"
-            f"   📍 起点: X={start_pos[0]:.1f}m, Y={start_pos[1]:.1f}m, Z={start_z:.1f}m\n"
-            f"   🎯 终点: X={goal_pos[0]:.1f}m, Y={goal_pos[1]:.1f}m, Z={goal_z:.1f}m"
+            f"4D search start | takeoff_time: T={start_time_s:.1f}s\n"
+            f"   start: X={start_pos[0]:.1f}m, Y={start_pos[1]:.1f}m, Z={start_z:.1f}m\n"
+            f"   goal: X={goal_pos[0]:.1f}m, Y={goal_pos[1]:.1f}m, Z={goal_z:.1f}m"
         )
 
         while open_list and steps < self.config.max_steps:
@@ -210,7 +210,11 @@ class AStarPlanner:
             d_xy = math.hypot(current_node.x - goal_pos[0], current_node.y - goal_pos[1])
             d_z = abs(current_node.z - goal_z)
             if d_xy < arrival_dist_xy and d_z < arrival_dist_z * 2:
-                print(f"4D 寻路成功！耗时步数: {steps}, 路线总期望代价: {current_node.g:.2f} J, 预计抵达时间: {current_node.time_s:.1f} s")
+                print(
+                    f"4D search success | steps: {steps}, "
+                    f"expected_cost: {current_node.g:.2f} J, "
+                    f"eta: {current_node.time_s:.1f} s"
+                )
                 return self._reconstruct_path(current_node)
 
             # 三维网格索引，用于闭集判断（防止走回头路）

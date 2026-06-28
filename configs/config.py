@@ -319,6 +319,9 @@ class SimulationConfig:
     rl_terminate_risk_threshold: float = 0.55
     rl_enable_apas: bool = False
     v25_apas_use_disruption: bool = True
+    v25_apas_segment_check_enabled: bool = True
+    v25_apas_segment_probe_samples: int = 32
+    v25_apas_segment_risk_threshold: float = 0.55
     v25_apas_heading_offsets_deg: Tuple[float, ...] = (
         0.0, 15.0, -15.0, 30.0, -30.0, 45.0, -45.0, 60.0, -60.0, 90.0, -90.0
     )
@@ -343,10 +346,56 @@ class SimulationConfig:
     v25_expert_hard_risk_threshold: float = 0.55
     v25_expert_risk_improvement_threshold: float = 0.08
     v25_expert_recovery_path_error_m: float = 650.0
+    v25_local_hazard_history_steps: int = 5
+    v25_local_hazard_trend_threshold: float = 0.02
+    v25_expert_trend_warning_need: float = 0.10
+    v25_expert_trend_forward_delta: float = 0.015
+    v25_expert_trend_risk_improvement_threshold: float = 0.03
+    v25_expert_mild_heading_actions: Tuple[float, ...] = (-0.35, 0.0, 0.35)
+    v25_expert_mild_speed_actions: Tuple[float, ...] = (-0.25, 0.0)
+    v25_expert_mild_agl_actions: Tuple[float, ...] = (0.0, 0.25)
+    v25_expert_rejoin_lookahead_wps: int = 4
+    v25_expert_rejoin_risk_low_threshold: float = 0.14
+    v25_expert_rejoin_max_avoiding_steps: int = 30
+    v25_expert_rejoin_from_cautious: bool = False
+    v25_expert_rejoin_from_low_progress: bool = False
+    v25_expert_rejoin_max_cautious_steps: int = 45
+    v25_expert_rejoin_max_low_progress_steps: int = 18
+    v25_expert_rejoin_min_progress_m: float = 3.0
+    v25_expert_rejoin_heading_action_limit: float = 0.35
+    v25_expert_rejoin_speed_action: float = 0.15
     v25_expert_emergency_heading_actions: Tuple[float, ...] = (-1.0, -0.75, 0.75, 1.0)
     v25_expert_emergency_speed_actions: Tuple[float, ...] = (-1.0, -0.75, -0.50)
     v25_expert_emergency_agl_actions: Tuple[float, ...] = (0.0, 1.0)
-
+    v25_risk_membrane_enabled: bool = True
+    v25_risk_membrane_angle_min_deg: float = -90.0
+    v25_risk_membrane_angle_max_deg: float = 90.0
+    v25_risk_membrane_angle_step_deg: float = 15.0
+    v25_risk_membrane_radial_bins: int = 4
+    v25_risk_membrane_lambda_theta_deg: float = 18.0
+    v25_risk_membrane_lambda_r_m: float = 260.0
+    v25_risk_membrane_block_threshold: float = 0.48
+    v25_risk_membrane_wall_width_deg: float = 45.0
+    v25_risk_membrane_min_gap_width_deg: float = 30.0
+    v25_risk_membrane_front_window_deg: float = 45.0
+    v25_expert_band_avoid_heading_limit: float = 0.90
+    v25_expert_band_avoid_speed_action: float = -0.35
+    v25_expert_pre_emergency_speed_action: float = -0.60
+    v25_stale_waypoint_skip_enabled: bool = True
+    v25_stale_waypoint_min_advance: int = 2
+    v25_stale_waypoint_corridor_m: float = 180.0
+    v25_replan_enabled: bool = False
+    v25_replan_max_per_episode: int = 3
+    v25_replan_cooldown_steps: int = 45
+    v25_replan_min_step: int = 25
+    v25_replan_path_error_m: float = 900.0
+    v25_replan_risk_low_threshold: float = 0.18
+    v25_replan_hard_risk_threshold: float = 0.55
+    v25_replan_low_progress_steps: int = 60
+    v25_replan_no_valid_linger_steps: int = 18
+    v25_replan_no_valid_low_progress_steps: int = 10
+    v25_replan_rejoin_lookahead_wps: int = 8
+    v25_replan_min_path_points: int = 2
     # v2.5 disruptive-reward tuning: bias RL toward low energy and low time while keeping risk control.
     v25_reward_power_saving_gain: float = 0.00014
     v25_reward_risk_gain: float = 0.65
@@ -404,6 +453,22 @@ class SimulationConfig:
     v25_reward_min_progress_m_true: float = 6.0
     v25_reward_apas_intervention_penalty_true: float = 0.08
     v25_reward_local_hazard_gain_true: float = 0.55
+    v25_eval_maneuver_heading_energy_j: float = 180.0
+    v25_eval_maneuver_speed_energy_j: float = 260.0
+    v25_eval_maneuver_agl_energy_j: float = 220.0
+    v25_eval_maneuver_action_delta_energy_j: float = 120.0
+    v25_eval_apas_fixed_energy_j: float = 1200.0
+    v25_eval_apas_heading_energy_j_per_deg: float = 18.0
+    v25_eval_apas_speed_reduction_energy_j_per_mps2: float = 140.0
+    v25_eval_apas_agl_energy_j_per_m: float = 12.0
+    v25_eval_expert_cautious_burden: float = 0.2
+    v25_eval_expert_avoiding_burden: float = 1.0
+    v25_eval_expert_emergency_burden: float = 5.0
+    v25_eval_expert_recovering_burden: float = 0.5
+    v25_eval_apas_intervention_burden: float = 10.0
+    v25_eval_apas_segment_rejection_burden: float = 0.2
+    v25_eval_apas_no_valid_burden: float = 20.0
+    v25_eval_burden_energy_equivalent_j: float = 800.0
     v25_goal_reward_true: float = 35.0
     v25_residual_gate_min_scale: float = 0.28
     v25_residual_gate_power: float = 1.1
@@ -587,6 +652,10 @@ class SimulationConfig:
             raise ValueError("v25_residual_gate_min_scale must be in [0, 1]")
         if self.v25_apas_speed_decrement_mps <= 0:
             raise ValueError("v25_apas_speed_decrement_mps must be > 0")
+        if self.v25_apas_segment_probe_samples < 1:
+            raise ValueError("v25_apas_segment_probe_samples must be >= 1")
+        if not (0.0 <= self.v25_apas_segment_risk_threshold <= 1.0):
+            raise ValueError("v25_apas_segment_risk_threshold must be in [0, 1]")
         if not self.v25_apas_heading_offsets_deg or not self.v25_apas_agl_increments_m:
             raise ValueError("v25 APAS candidate lists must not be empty")
         if not self.v25_expert_heading_actions or not self.v25_expert_speed_actions or not self.v25_expert_agl_actions:
@@ -603,12 +672,84 @@ class SimulationConfig:
             raise ValueError("v25_expert_risk_improvement_threshold must be in [0, 1]")
         if self.v25_expert_recovery_path_error_m < 0:
             raise ValueError("v25_expert_recovery_path_error_m must be >= 0")
+        if self.v25_local_hazard_history_steps < 1:
+            raise ValueError("v25_local_hazard_history_steps must be >= 1")
+        if self.v25_local_hazard_trend_threshold < 0:
+            raise ValueError("v25_local_hazard_trend_threshold must be >= 0")
+        if not (0.0 <= self.v25_expert_trend_warning_need <= 1.0):
+            raise ValueError("v25_expert_trend_warning_need must be in [0, 1]")
+        if self.v25_expert_trend_forward_delta < 0:
+            raise ValueError("v25_expert_trend_forward_delta must be >= 0")
+        if not (0.0 <= self.v25_expert_trend_risk_improvement_threshold <= 1.0):
+            raise ValueError("v25_expert_trend_risk_improvement_threshold must be in [0, 1]")
+        if not self.v25_expert_mild_heading_actions or not self.v25_expert_mild_speed_actions or not self.v25_expert_mild_agl_actions:
+            raise ValueError("v25 expert mild candidate lists must not be empty")
+        if self.v25_expert_rejoin_lookahead_wps < 1:
+            raise ValueError("v25_expert_rejoin_lookahead_wps must be >= 1")
+        if not (0.0 <= self.v25_expert_rejoin_risk_low_threshold <= 1.0):
+            raise ValueError("v25_expert_rejoin_risk_low_threshold must be in [0, 1]")
+        if self.v25_expert_rejoin_max_avoiding_steps < 1:
+            raise ValueError("v25_expert_rejoin_max_avoiding_steps must be >= 1")
+        if self.v25_expert_rejoin_max_cautious_steps < 1:
+            raise ValueError("v25_expert_rejoin_max_cautious_steps must be >= 1")
+        if self.v25_expert_rejoin_max_low_progress_steps < 1:
+            raise ValueError("v25_expert_rejoin_max_low_progress_steps must be >= 1")
+        if self.v25_expert_rejoin_min_progress_m < 0:
+            raise ValueError("v25_expert_rejoin_min_progress_m must be >= 0")
+        if not (0.0 <= self.v25_expert_rejoin_heading_action_limit <= 1.0):
+            raise ValueError("v25_expert_rejoin_heading_action_limit must be in [0, 1]")
+        if not (-1.0 <= self.v25_expert_rejoin_speed_action <= 1.0):
+            raise ValueError("v25_expert_rejoin_speed_action must be in [-1, 1]")
         if (
             not self.v25_expert_emergency_heading_actions
             or not self.v25_expert_emergency_speed_actions
             or not self.v25_expert_emergency_agl_actions
         ):
             raise ValueError("v25 expert emergency candidate lists must not be empty")
+        if self.v25_risk_membrane_angle_step_deg <= 0:
+            raise ValueError("v25_risk_membrane_angle_step_deg must be > 0")
+        if self.v25_risk_membrane_angle_max_deg <= self.v25_risk_membrane_angle_min_deg:
+            raise ValueError("v25 risk membrane angle range is invalid")
+        if self.v25_risk_membrane_radial_bins < 1:
+            raise ValueError("v25_risk_membrane_radial_bins must be >= 1")
+        if self.v25_risk_membrane_lambda_theta_deg <= 0 or self.v25_risk_membrane_lambda_r_m <= 0:
+            raise ValueError("v25 risk membrane decay constants must be > 0")
+        if not (0.0 <= self.v25_risk_membrane_block_threshold <= 1.0):
+            raise ValueError("v25_risk_membrane_block_threshold must be in [0, 1]")
+        if self.v25_risk_membrane_wall_width_deg < 0 or self.v25_risk_membrane_min_gap_width_deg < 0:
+            raise ValueError("v25 risk membrane width thresholds must be >= 0")
+        if not (0.0 <= self.v25_expert_band_avoid_heading_limit <= 1.0):
+            raise ValueError("v25_expert_band_avoid_heading_limit must be in [0, 1]")
+        if not (-1.0 <= self.v25_expert_band_avoid_speed_action <= 1.0):
+            raise ValueError("v25_expert_band_avoid_speed_action must be in [-1, 1]")
+        if not (-1.0 <= self.v25_expert_pre_emergency_speed_action <= 1.0):
+            raise ValueError("v25_expert_pre_emergency_speed_action must be in [-1, 1]")
+        if self.v25_stale_waypoint_min_advance < 1:
+            raise ValueError("v25_stale_waypoint_min_advance must be >= 1")
+        if self.v25_stale_waypoint_corridor_m < 0:
+            raise ValueError("v25_stale_waypoint_corridor_m must be >= 0")
+        if self.v25_replan_max_per_episode < 0:
+            raise ValueError("v25_replan_max_per_episode must be >= 0")
+        if self.v25_replan_cooldown_steps < 0:
+            raise ValueError("v25_replan_cooldown_steps must be >= 0")
+        if self.v25_replan_min_step < 0:
+            raise ValueError("v25_replan_min_step must be >= 0")
+        if self.v25_replan_path_error_m < 0:
+            raise ValueError("v25_replan_path_error_m must be >= 0")
+        if not (0.0 <= self.v25_replan_risk_low_threshold <= 1.0):
+            raise ValueError("v25_replan_risk_low_threshold must be in [0, 1]")
+        if not (0.0 <= self.v25_replan_hard_risk_threshold <= 1.0):
+            raise ValueError("v25_replan_hard_risk_threshold must be in [0, 1]")
+        if self.v25_replan_low_progress_steps < 1:
+            raise ValueError("v25_replan_low_progress_steps must be >= 1")
+        if self.v25_replan_no_valid_linger_steps < 0:
+            raise ValueError("v25_replan_no_valid_linger_steps must be >= 0")
+        if self.v25_replan_no_valid_low_progress_steps < 1:
+            raise ValueError("v25_replan_no_valid_low_progress_steps must be >= 1")
+        if self.v25_replan_rejoin_lookahead_wps < 1:
+            raise ValueError("v25_replan_rejoin_lookahead_wps must be >= 1")
+        if self.v25_replan_min_path_points < 2:
+            raise ValueError("v25_replan_min_path_points must be >= 2")
         if min(
             self.v25_expert_risk_gain,
             self.v25_expert_core_penalty,
@@ -622,6 +763,25 @@ class SimulationConfig:
             self.v25_expert_activation_hazard,
         ) < 0:
             raise ValueError("v25 expert scoring gains must be >= 0")
+        if min(
+            self.v25_eval_maneuver_heading_energy_j,
+            self.v25_eval_maneuver_speed_energy_j,
+            self.v25_eval_maneuver_agl_energy_j,
+            self.v25_eval_maneuver_action_delta_energy_j,
+            self.v25_eval_apas_fixed_energy_j,
+            self.v25_eval_apas_heading_energy_j_per_deg,
+            self.v25_eval_apas_speed_reduction_energy_j_per_mps2,
+            self.v25_eval_apas_agl_energy_j_per_m,
+            self.v25_eval_expert_cautious_burden,
+            self.v25_eval_expert_avoiding_burden,
+            self.v25_eval_expert_emergency_burden,
+            self.v25_eval_expert_recovering_burden,
+            self.v25_eval_apas_intervention_burden,
+            self.v25_eval_apas_segment_rejection_burden,
+            self.v25_eval_apas_no_valid_burden,
+            self.v25_eval_burden_energy_equivalent_j,
+        ) < 0:
+            raise ValueError("v25 evaluation cost weights must be >= 0")
         
         logger.debug(f"✓ Config validated: drone_speed={self.drone_speed}m/s, battery={self.battery_capacity_j/1e6:.1f}MJ")
 

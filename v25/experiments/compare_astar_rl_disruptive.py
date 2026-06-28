@@ -198,6 +198,10 @@ def _evaluate_in_shared_true_world(
         "episode_unneeded_residual_sum": float(getattr(env, "episode_unneeded_residual_sum", 0.0)),
         "episode_needed_residual_sum": float(getattr(env, "episode_needed_residual_sum", 0.0)),
         "episode_apas_interventions": int(getattr(env, "episode_apas_interventions", 0)),
+        "episode_apas_segment_rejections": int(getattr(env, "episode_apas_segment_rejections", 0)),
+        "episode_apas_no_valid_candidates": int(getattr(env, "episode_apas_no_valid_candidates", 0)),
+        "episode_stale_waypoint_skips": int(getattr(env, "episode_stale_waypoint_skips", 0)),
+        "episode_stale_waypoint_skip_delta": int(getattr(env, "episode_stale_waypoint_skip_delta", 0)),
         "episode_destructive_core_hits": int(getattr(env, "episode_destructive_core_hits", 0)),
         "episode_unproductive_residual_cost_sum": float(
             getattr(env, "episode_unproductive_residual_cost_sum", 0.0)
@@ -212,11 +216,41 @@ def _evaluate_in_shared_true_world(
             getattr(env, "episode_local_hazard_need_sum", 0.0) / max(env.current_step, 1)
         ),
         "episode_local_hazard_cost_sum": float(getattr(env, "episode_local_hazard_cost_sum", 0.0)),
+        "episode_local_hazard_trend_need_mean": float(
+            getattr(env, "episode_local_hazard_trend_need_sum", 0.0) / max(env.current_step, 1)
+        ),
+        "episode_local_hazard_forward_delta_mean": float(
+            getattr(env, "episode_local_hazard_forward_delta_sum", 0.0) / max(env.current_step, 1)
+        ),
+        "episode_local_hazard_positive_trend_steps": int(
+            getattr(env, "episode_local_hazard_positive_trend_steps", 0)
+        ),
+        "episode_eval_maneuver_extra_energy_j": float(
+            getattr(env, "episode_eval_maneuver_extra_energy_j", 0.0)
+        ),
+        "episode_eval_safety_intervention_burden": float(
+            getattr(env, "episode_eval_safety_intervention_burden", 0.0)
+        ),
+        "episode_eval_adjusted_energy_j": float(getattr(env, "episode_eval_adjusted_energy_j", 0.0)),
         "episode_expert_normal_steps": int(getattr(env, "episode_expert_normal_steps", 0)),
         "episode_expert_cautious_steps": int(getattr(env, "episode_expert_cautious_steps", 0)),
+        "episode_expert_cautious_trend_steps": int(getattr(env, "episode_expert_cautious_trend_steps", 0)),
         "episode_expert_avoiding_steps": int(getattr(env, "episode_expert_avoiding_steps", 0)),
         "episode_expert_emergency_steps": int(getattr(env, "episode_expert_emergency_steps", 0)),
+        "episode_expert_band_avoidance_steps": int(getattr(env, "episode_expert_band_avoidance_steps", 0)),
+        "episode_expert_pre_emergency_slow_steps": int(getattr(env, "episode_expert_pre_emergency_slow_steps", 0)),
         "episode_expert_recovering_steps": int(getattr(env, "episode_expert_recovering_steps", 0)),
+        "episode_expert_rejoin_actions": int(getattr(env, "episode_expert_rejoin_actions", 0)),
+        "episode_expert_rejoin_attempts": int(getattr(env, "episode_expert_rejoin_attempts", 0)),
+        "episode_expert_rejoin_rejected": int(getattr(env, "episode_expert_rejoin_rejected", 0)),
+        "episode_replans": int(getattr(env, "episode_replans", 0)),
+        "episode_replan_successes": int(getattr(env, "episode_replan_successes", 0)),
+        "episode_replan_failures": int(getattr(env, "episode_replan_failures", 0)),
+        "episode_replan_to_rejoin_successes": int(getattr(env, "episode_replan_to_rejoin_successes", 0)),
+        "episode_replan_to_goal_successes": int(getattr(env, "episode_replan_to_goal_successes", 0)),
+        "episode_replan_path_drift_triggers": int(getattr(env, "episode_replan_path_drift_triggers", 0)),
+        "episode_replan_low_progress_triggers": int(getattr(env, "episode_replan_low_progress_triggers", 0)),
+        "episode_replan_no_valid_triggers": int(getattr(env, "episode_replan_no_valid_triggers", 0)),
     }
 
 
@@ -287,6 +321,18 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
     episode_unneeded_residual_sum_mean = float(np.mean([float(r["episode_unneeded_residual_sum"]) for r in sub])) if sub else 0.0
     episode_needed_residual_sum_mean = float(np.mean([float(r["episode_needed_residual_sum"]) for r in sub])) if sub else 0.0
     episode_apas_interventions_mean = float(np.mean([float(r["episode_apas_interventions"]) for r in sub])) if sub else 0.0
+    episode_apas_segment_rejections_mean = (
+        float(np.mean([float(r.get("episode_apas_segment_rejections", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_apas_no_valid_candidates_mean = (
+        float(np.mean([float(r.get("episode_apas_no_valid_candidates", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_stale_waypoint_skips_mean = (
+        float(np.mean([float(r.get("episode_stale_waypoint_skips", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_stale_waypoint_skip_delta_mean = (
+        float(np.mean([float(r.get("episode_stale_waypoint_skip_delta", 0.0)) for r in sub])) if sub else 0.0
+    )
     episode_destructive_core_hits_mean = float(np.mean([float(r["episode_destructive_core_hits"]) for r in sub])) if sub else 0.0
     episode_unproductive_residual_cost_sum_mean = (
         float(np.mean([float(r["episode_unproductive_residual_cost_sum"]) for r in sub])) if sub else 0.0
@@ -309,11 +355,32 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
     episode_local_hazard_cost_sum_mean = (
         float(np.mean([float(r["episode_local_hazard_cost_sum"]) for r in sub])) if sub else 0.0
     )
+    episode_local_hazard_trend_need_mean = (
+        float(np.mean([float(r.get("episode_local_hazard_trend_need_mean", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_local_hazard_forward_delta_mean = (
+        float(np.mean([float(r.get("episode_local_hazard_forward_delta_mean", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_local_hazard_positive_trend_steps_mean = (
+        float(np.mean([float(r.get("episode_local_hazard_positive_trend_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_eval_maneuver_extra_energy_j_mean = (
+        float(np.mean([float(r.get("episode_eval_maneuver_extra_energy_j", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_eval_safety_intervention_burden_mean = (
+        float(np.mean([float(r.get("episode_eval_safety_intervention_burden", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_eval_adjusted_energy_j_mean = (
+        float(np.mean([float(r.get("episode_eval_adjusted_energy_j", 0.0)) for r in sub])) if sub else 0.0
+    )
     episode_expert_normal_steps_mean = (
         float(np.mean([float(r.get("episode_expert_normal_steps", 0.0)) for r in sub])) if sub else 0.0
     )
     episode_expert_cautious_steps_mean = (
         float(np.mean([float(r.get("episode_expert_cautious_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_expert_cautious_trend_steps_mean = (
+        float(np.mean([float(r.get("episode_expert_cautious_trend_steps", 0.0)) for r in sub])) if sub else 0.0
     )
     episode_expert_avoiding_steps_mean = (
         float(np.mean([float(r.get("episode_expert_avoiding_steps", 0.0)) for r in sub])) if sub else 0.0
@@ -321,8 +388,47 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
     episode_expert_emergency_steps_mean = (
         float(np.mean([float(r.get("episode_expert_emergency_steps", 0.0)) for r in sub])) if sub else 0.0
     )
+    episode_expert_band_avoidance_steps_mean = (
+        float(np.mean([float(r.get("episode_expert_band_avoidance_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_expert_pre_emergency_slow_steps_mean = (
+        float(np.mean([float(r.get("episode_expert_pre_emergency_slow_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
     episode_expert_recovering_steps_mean = (
         float(np.mean([float(r.get("episode_expert_recovering_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_expert_rejoin_actions_mean = (
+        float(np.mean([float(r.get("episode_expert_rejoin_actions", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_expert_rejoin_attempts_mean = (
+        float(np.mean([float(r.get("episode_expert_rejoin_attempts", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_expert_rejoin_rejected_mean = (
+        float(np.mean([float(r.get("episode_expert_rejoin_rejected", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replans_mean = (
+        float(np.mean([float(r.get("episode_replans", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_successes_mean = (
+        float(np.mean([float(r.get("episode_replan_successes", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_failures_mean = (
+        float(np.mean([float(r.get("episode_replan_failures", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_to_rejoin_successes_mean = (
+        float(np.mean([float(r.get("episode_replan_to_rejoin_successes", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_to_goal_successes_mean = (
+        float(np.mean([float(r.get("episode_replan_to_goal_successes", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_path_drift_triggers_mean = (
+        float(np.mean([float(r.get("episode_replan_path_drift_triggers", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_low_progress_triggers_mean = (
+        float(np.mean([float(r.get("episode_replan_low_progress_triggers", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_replan_no_valid_triggers_mean = (
+        float(np.mean([float(r.get("episode_replan_no_valid_triggers", 0.0)) for r in sub])) if sub else 0.0
     )
     return {
         "episodes": len(sub),
@@ -354,6 +460,10 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
         "episode_unneeded_residual_sum_mean": episode_unneeded_residual_sum_mean,
         "episode_needed_residual_sum_mean": episode_needed_residual_sum_mean,
         "episode_apas_interventions_mean": episode_apas_interventions_mean,
+        "episode_apas_segment_rejections_mean": episode_apas_segment_rejections_mean,
+        "episode_apas_no_valid_candidates_mean": episode_apas_no_valid_candidates_mean,
+        "episode_stale_waypoint_skips_mean": episode_stale_waypoint_skips_mean,
+        "episode_stale_waypoint_skip_delta_mean": episode_stale_waypoint_skip_delta_mean,
         "episode_destructive_core_hits_mean": episode_destructive_core_hits_mean,
         "episode_unproductive_residual_cost_sum_mean": episode_unproductive_residual_cost_sum_mean,
         "episode_progress_shortfall_mean": episode_progress_shortfall_mean,
@@ -362,11 +472,31 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
         "episode_residual_gate_mean": episode_residual_gate_mean,
         "episode_local_hazard_need_mean": episode_local_hazard_need_mean,
         "episode_local_hazard_cost_sum_mean": episode_local_hazard_cost_sum_mean,
+        "episode_local_hazard_trend_need_mean": episode_local_hazard_trend_need_mean,
+        "episode_local_hazard_forward_delta_mean": episode_local_hazard_forward_delta_mean,
+        "episode_local_hazard_positive_trend_steps_mean": episode_local_hazard_positive_trend_steps_mean,
+        "episode_eval_maneuver_extra_energy_j_mean": episode_eval_maneuver_extra_energy_j_mean,
+        "episode_eval_safety_intervention_burden_mean": episode_eval_safety_intervention_burden_mean,
+        "episode_eval_adjusted_energy_j_mean": episode_eval_adjusted_energy_j_mean,
         "episode_expert_normal_steps_mean": episode_expert_normal_steps_mean,
         "episode_expert_cautious_steps_mean": episode_expert_cautious_steps_mean,
+        "episode_expert_cautious_trend_steps_mean": episode_expert_cautious_trend_steps_mean,
         "episode_expert_avoiding_steps_mean": episode_expert_avoiding_steps_mean,
         "episode_expert_emergency_steps_mean": episode_expert_emergency_steps_mean,
+        "episode_expert_band_avoidance_steps_mean": episode_expert_band_avoidance_steps_mean,
+        "episode_expert_pre_emergency_slow_steps_mean": episode_expert_pre_emergency_slow_steps_mean,
         "episode_expert_recovering_steps_mean": episode_expert_recovering_steps_mean,
+        "episode_expert_rejoin_actions_mean": episode_expert_rejoin_actions_mean,
+        "episode_expert_rejoin_attempts_mean": episode_expert_rejoin_attempts_mean,
+        "episode_expert_rejoin_rejected_mean": episode_expert_rejoin_rejected_mean,
+        "episode_replans_mean": episode_replans_mean,
+        "episode_replan_successes_mean": episode_replan_successes_mean,
+        "episode_replan_failures_mean": episode_replan_failures_mean,
+        "episode_replan_to_rejoin_successes_mean": episode_replan_to_rejoin_successes_mean,
+        "episode_replan_to_goal_successes_mean": episode_replan_to_goal_successes_mean,
+        "episode_replan_path_drift_triggers_mean": episode_replan_path_drift_triggers_mean,
+        "episode_replan_low_progress_triggers_mean": episode_replan_low_progress_triggers_mean,
+        "episode_replan_no_valid_triggers_mean": episode_replan_no_valid_triggers_mean,
     }
 
 
@@ -397,6 +527,7 @@ def compare_against_astar(rows: List[Dict[str, object]], method: str) -> Dict[st
     n = max(len(shared_episodes), 1)
     return {
         "method": method,
+        "baseline_method": "astar_only",
         "episodes": len(shared_episodes),
         "rescued_count": len(rescued),
         "harmed_count": len(harmed),
@@ -412,7 +543,10 @@ def compare_against_astar(rows: List[Dict[str, object]], method: str) -> Dict[st
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare A* only vs A*+RL under predictable-planning + disruptive-execution setup."
+        description=(
+            "Compare zero-residual A* baselines, Expert, and RL under the "
+            "predictable-planning + disruptive-execution setup."
+        )
     )
     parser.add_argument("--rl-model-path", required=True, help="Path to PPO model (with or without .zip suffix).")
     parser.add_argument("--episodes", type=int, default=30, help="Number of episodes to compare.")
@@ -466,7 +600,42 @@ def build_parser() -> argparse.ArgumentParser:
         default=30000,
         help="A* search budget used during comparison task sampling and execution.",
     )
+    parser.add_argument(
+        "--apas-segment-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable swept-segment core/risk checks inside APAS (default: true).",
+    )
+    parser.add_argument(
+        "--replan",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable v2.5 replan-to-rejoin recovery after stalled/invalid local progress (default: false).",
+    )
+    parser.add_argument(
+        "--stale-waypoint-skip",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable projection-based stale waypoint skipping for all controllers (default: true).",
+    )
+    parser.add_argument(
+        "--risk-membrane",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable the expert's local risk membrane / band-avoidance observer (default: true).",
+    )
     return parser
+
+
+def _controller_label(method: str, *, apas: bool, stale_wp: bool, risk_membrane: bool) -> str:
+    parts = [method]
+    if apas:
+        parts.append("APAS")
+    if stale_wp:
+        parts.append("waypoint-skip")
+    if risk_membrane and "Expert" in method:
+        parts.append("risk-membrane")
+    return " + ".join(parts)
 
 
 def main() -> int:
@@ -480,6 +649,29 @@ def main() -> int:
     config.planner_time_mode = "4d"
     config.max_steps = int(args.planner_max_steps)
     config.v25_disruption_stress_level = str(args.stress)
+    config.v25_apas_segment_check_enabled = bool(args.apas_segment_check)
+    config.v25_replan_enabled = bool(args.replan)
+    config.v25_stale_waypoint_skip_enabled = bool(args.stale_waypoint_skip)
+    config.v25_risk_membrane_enabled = bool(args.risk_membrane)
+
+    astar_label = _controller_label(
+        "A* zero-residual",
+        apas=bool(args.astar_apas),
+        stale_wp=bool(args.stale_waypoint_skip),
+        risk_membrane=False,
+    )
+    expert_label = _controller_label(
+        "A* + Expert",
+        apas=bool(args.expert_apas),
+        stale_wp=bool(args.stale_waypoint_skip),
+        risk_membrane=bool(args.risk_membrane),
+    )
+    rl_label = _controller_label(
+        "A* + RL",
+        apas=bool(args.rl_apas),
+        stale_wp=bool(args.stale_waypoint_skip),
+        risk_membrane=False,
+    )
 
     rows: List[Dict[str, object]] = []
     for ep in range(int(args.episodes)):
@@ -504,6 +696,10 @@ def main() -> int:
                 "episode": ep,
                 "seed": ep_seed,
                 "method": "astar_only",
+                "controller_label": astar_label,
+                "apas_enabled": bool(args.astar_apas),
+                "stale_waypoint_skip_enabled": bool(args.stale_waypoint_skip),
+                "risk_membrane_enabled": False,
                 "start_x": task.start_xy[0],
                 "start_y": task.start_xy[1],
                 "goal_x": task.goal_xy[0],
@@ -517,6 +713,10 @@ def main() -> int:
                     "episode": ep,
                     "seed": ep_seed,
                     "method": "astar_plus_expert",
+                    "controller_label": expert_label,
+                    "apas_enabled": bool(args.expert_apas),
+                    "stale_waypoint_skip_enabled": bool(args.stale_waypoint_skip),
+                    "risk_membrane_enabled": bool(args.risk_membrane),
                     "start_x": task.start_xy[0],
                     "start_y": task.start_xy[1],
                     "goal_x": task.goal_xy[0],
@@ -529,6 +729,10 @@ def main() -> int:
                 "episode": ep,
                 "seed": ep_seed,
                 "method": "astar_plus_rl",
+                "controller_label": rl_label,
+                "apas_enabled": bool(args.rl_apas),
+                "stale_waypoint_skip_enabled": bool(args.stale_waypoint_skip),
+                "risk_membrane_enabled": False,
                 "start_x": task.start_xy[0],
                 "start_y": task.start_xy[1],
                 "goal_x": task.goal_xy[0],
@@ -539,14 +743,14 @@ def main() -> int:
 
         print(
             f"[episode {ep:03d}] seed={ep_seed} "
-            f"A* success={astar_metrics['success']} reason={astar_metrics['terminated_reason']} | "
+            f"{astar_label} success={astar_metrics['success']} reason={astar_metrics['terminated_reason']} | "
             + (
-                f"Expert success={expert_metrics['success']} reason={expert_metrics['terminated_reason']} | "
+                f"{expert_label} success={expert_metrics['success']} reason={expert_metrics['terminated_reason']} | "
                 if expert_metrics is not None
                 else ""
             )
             +
-            f"RL success={rl_metrics['success']} reason={rl_metrics['terminated_reason']}",
+            f"{rl_label} success={rl_metrics['success']} reason={rl_metrics['terminated_reason']}",
             flush=True,
         )
 
@@ -578,8 +782,18 @@ def main() -> int:
             "astar_apas": bool(args.astar_apas),
             "expert": bool(args.expert),
             "expert_apas": bool(args.expert_apas),
+            "apas_segment_check": bool(args.apas_segment_check),
+            "replan": bool(args.replan),
+            "stale_waypoint_skip": bool(args.stale_waypoint_skip),
+            "risk_membrane": bool(args.risk_membrane),
             "planner_max_steps": int(args.planner_max_steps),
         },
+        "controller_labels": {
+            "astar_only": astar_label,
+            **({"astar_plus_expert": expert_label} if expert_summary is not None else {}),
+            "astar_plus_rl": rl_label,
+        },
+        "zero_residual_astar_baseline": astar_summary,
         "astar_only": astar_summary,
         **({"astar_plus_expert": expert_summary} if expert_summary is not None else {}),
         "astar_plus_rl": rl_summary,
@@ -590,12 +804,12 @@ def main() -> int:
     summary_json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print("\n=== Comparison Summary ===")
-    print(f"A* only:    {astar_summary}")
+    print(f"{astar_label}: {astar_summary}")
     if expert_summary is not None:
-        print(f"A* + Expert:{expert_summary}")
-        print(f"Expert vs A*: {expert_vs_astar}")
-    print(f"A* + RL:    {rl_summary}")
-    print(f"RL vs A*:     {rl_vs_astar}")
+        print(f"{expert_label}: {expert_summary}")
+        print(f"Expert vs {astar_label}: {expert_vs_astar}")
+    print(f"{rl_label}: {rl_summary}")
+    print(f"RL vs {astar_label}:     {rl_vs_astar}")
     print(f"raw_csv:    {raw_csv_path}")
     print(f"summary:    {summary_json_path}")
     return 0

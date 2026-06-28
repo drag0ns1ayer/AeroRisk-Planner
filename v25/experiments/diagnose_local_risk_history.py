@@ -121,8 +121,10 @@ def _run_method(config: SimulationConfig, seed: int, method: str, max_steps: int
         diag = _local_oracle_diagnostics(env)
         if method == "expert":
             action = env.local_avoidance_expert_action()
+            expert_mode = str(getattr(env, "last_expert_mode", "unknown"))
         elif method == "astar":
             action = np.zeros(3, dtype=np.float32)
+            expert_mode = "inactive"
         else:
             raise ValueError(f"Unsupported method: {method}")
 
@@ -152,6 +154,10 @@ def _run_method(config: SimulationConfig, seed: int, method: str, max_steps: int
                 "action_heading": float(action[0]),
                 "action_speed": float(action[1]),
                 "action_agl": float(action[2]),
+                "expert_mode": expert_mode,
+                "expert_rejoin_actions_so_far": int(getattr(env, "episode_expert_rejoin_actions", 0)),
+                "expert_rejoin_attempts_so_far": int(getattr(env, "episode_expert_rejoin_attempts", 0)),
+                "expert_rejoin_rejected_so_far": int(getattr(env, "episode_expert_rejoin_rejected", 0)),
                 **diag,
                 **delta,
             }
@@ -173,6 +179,15 @@ def _run_method(config: SimulationConfig, seed: int, method: str, max_steps: int
         "bearing_motion_mean_abs_deg": float(
             np.mean([abs(float(r["delta_max_sample_bearing_deg"])) for r in rows[1:]]) if len(rows) > 1 else 0.0
         ),
+        "expert_normal_steps": int(getattr(env, "episode_expert_normal_steps", 0)),
+        "expert_cautious_steps": int(getattr(env, "episode_expert_cautious_steps", 0)),
+        "expert_cautious_trend_steps": int(getattr(env, "episode_expert_cautious_trend_steps", 0)),
+        "expert_avoiding_steps": int(getattr(env, "episode_expert_avoiding_steps", 0)),
+        "expert_emergency_steps": int(getattr(env, "episode_expert_emergency_steps", 0)),
+        "expert_recovering_steps": int(getattr(env, "episode_expert_recovering_steps", 0)),
+        "expert_rejoin_actions": int(getattr(env, "episode_expert_rejoin_actions", 0)),
+        "expert_rejoin_attempts": int(getattr(env, "episode_expert_rejoin_attempts", 0)),
+        "expert_rejoin_rejected": int(getattr(env, "episode_expert_rejoin_rejected", 0)),
     }
     return rows, summary
 

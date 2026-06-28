@@ -145,6 +145,54 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertEqual(len(points), self.config.v25_circle_oracle_samples)
         self.assertGreaterEqual(front_count, 60)
 
+    def test_local_hazard_history_reports_positive_trend(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.local_hazard_history = [
+            {"max_danger": 0.10, "forward_danger": 0.04, "nearest_closeness": 0.20}
+        ]
+        current = {
+            "max_danger": 0.24,
+            "forward_danger": 0.18,
+            "nearest_closeness": 0.40,
+        }
+
+        trend = env._local_hazard_history_features(current)
+
+        self.assertGreater(trend["trend_need"], 0.0)
+        self.assertGreater(trend["delta_max_danger"], 0.0)
+        self.assertGreater(trend["delta_forward_danger"], 0.0)
+        self.assertGreater(trend["delta_nearest_closeness"], 0.0)
+
+    def test_gradual_warning_requires_trend_before_hard_danger(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        summary = {
+            "hazard_need": self.config.v25_expert_activation_hazard * 0.5,
+            "base_hazard_need": self.config.v25_expert_activation_hazard * 0.5,
+            "max_danger": 0.20,
+            "forward_danger": 0.16,
+            "nearest_closeness": 0.40,
+            "trend_need": self.config.v25_expert_trend_warning_need + 0.05,
+            "delta_forward_danger": self.config.v25_expert_trend_forward_delta + 0.01,
+        }
+
+        self.assertEqual(env._local_hazard_gradual_warning(summary), 1.0)
+
+        summary["base_hazard_need"] = self.config.v25_expert_activation_hazard + 0.01
+        self.assertEqual(env._local_hazard_gradual_warning(summary), 0.0)
+
+    def test_reset_clears_local_hazard_history(self):
+        self.config.curriculum_stage = 1
+        env = GuidedDroneEnvV25(self.config)
+        env.local_hazard_history.append(
+            {"max_danger": 1.0, "forward_danger": 1.0, "nearest_closeness": 1.0}
+        )
+
+        env.reset(seed=42)
+
+        self.assertEqual(len(env.local_hazard_history), 0)
+
     def test_true_wind_changes_ground_track(self):
         dynamics = TrueWorldDynamicsV25(self.config)
         state = VehicleStateV25(
@@ -420,13 +468,146 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertEqual(env.last_expert_mode, "recovering")
         self.assertTrue(env.last_expert_active)
 
+    def test_rejoin_does_not_trigger_from_cautious_by_default(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.global_astar_path = [(0.0, 0.0, 100.0), (1000.0, 0.0, 100.0)]
+        env.consecutive_avoiding_steps = 0
+        env.consecutive_cautious_steps = self.config.v25_expert_rejoin_max_cautious_steps
+        env.consecutive_low_progress_steps = 0
+
+        should_rejoin = env._should_rejoin(
+            {
+                "hazard_need": self.config.v25_expert_activation_hazard + 0.01,
+                "max_danger": self.config.v25_expert_hard_risk_threshold - 0.01,
+            },
+            path_error_m=0.0,
+        )
+
+        self.assertFalse(should_rejoin)
+
+    def test_rejoin_can_experimentally_trigger_after_long_cautious_loitering(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        self.config.v25_expert_rejoin_from_cautious = True
+        env.config = self.config
+        env.global_astar_path = [(0.0, 0.0, 100.0), (1000.0, 0.0, 100.0)]
+        env.consecutive_avoiding_steps = 0
+        env.consecutive_cautious_steps = self.config.v25_expert_rejoin_max_cautious_steps
+        env.consecutive_low_progress_steps = 0
+
+        should_rejoin = env._should_rejoin(
+            {
+                "hazard_need": self.config.v25_expert_activation_hazard + 0.01,
+                "max_danger": self.config.v25_expert_hard_risk_threshold - 0.01,
+            },
+            path_error_m=0.0,
+        )
+
+        self.assertTrue(should_rejoin)
+
+    def test_rejoin_does_not_trigger_from_stalled_progress_by_default(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.global_astar_path = [(0.0, 0.0, 100.0), (1000.0, 0.0, 100.0)]
+        env.consecutive_avoiding_steps = 0
+        env.consecutive_cautious_steps = 0
+        env.consecutive_low_progress_steps = self.config.v25_expert_rejoin_max_low_progress_steps
+
+        should_rejoin = env._should_rejoin(
+            {
+                "hazard_need": self.config.v25_expert_activation_hazard + 0.01,
+                "max_danger": self.config.v25_expert_hard_risk_threshold - 0.01,
+            },
+            path_error_m=0.0,
+        )
+
+        self.assertFalse(should_rejoin)
+
+    def test_rejoin_does_not_override_hard_danger(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.global_astar_path = [(0.0, 0.0, 100.0), (1000.0, 0.0, 100.0)]
+        env.consecutive_avoiding_steps = self.config.v25_expert_rejoin_max_avoiding_steps
+        env.consecutive_cautious_steps = self.config.v25_expert_rejoin_max_cautious_steps
+        env.consecutive_low_progress_steps = self.config.v25_expert_rejoin_max_low_progress_steps
+
+        should_rejoin = env._should_rejoin(
+            {
+                "hazard_need": self.config.v25_expert_hard_risk_threshold,
+                "max_danger": self.config.v25_expert_hard_risk_threshold,
+            },
+            path_error_m=self.config.v25_expert_recovery_path_error_m + 1.0,
+        )
+
+        self.assertFalse(should_rejoin)
+
+    def test_replan_trigger_waits_for_low_risk_when_path_drifted(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        self.config.v25_replan_enabled = True
+        env.config = self.config
+        env.global_astar_path = [(0.0, 0.0, 100.0), (1000.0, 0.0, 100.0)]
+        env.episode_replans = 0
+        env.replan_cooldown_steps_remaining = 0
+        env.current_step = self.config.v25_replan_min_step
+        env.apas_no_valid_linger_steps = 0
+        env.consecutive_replan_low_progress_steps = 0
+
+        hard_reason = env._replan_trigger_reason(
+            {
+                "hazard_need": self.config.v25_replan_hard_risk_threshold,
+                "max_danger": self.config.v25_replan_hard_risk_threshold,
+            },
+            path_error_m=self.config.v25_replan_path_error_m + 1.0,
+        )
+        low_risk_reason = env._replan_trigger_reason(
+            {"hazard_need": 0.0, "max_danger": 0.0},
+            path_error_m=self.config.v25_replan_path_error_m + 1.0,
+        )
+
+        self.assertIsNone(hard_reason)
+        self.assertEqual(low_risk_reason, "path_drift")
+
+    def test_replan_to_rejoin_splices_new_prefix_with_original_suffix(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        self.config.v25_replan_enabled = True
+        self.config.v25_replan_rejoin_lookahead_wps = 1
+        env.config = self.config
+        env.current_pos = np.array([20.0, 50.0, 100.0], dtype=float)
+        env.current_time = 10.0
+        env.current_wp_idx = 1
+        env.global_astar_path = [
+            (0.0, 0.0, 100.0),
+            (100.0, 0.0, 100.0),
+            (200.0, 0.0, 100.0),
+            (300.0, 0.0, 100.0),
+        ]
+        env.goal_pos = np.array([300.0, 0.0, 100.0], dtype=float)
+        env.episode_replan_to_rejoin_successes = 0
+        env.episode_replan_to_goal_successes = 0
+
+        class FakePlanner:
+            def search(self, start_xy, goal_xy, start_time_s=0.0):
+                if np.allclose(goal_xy, (200.0, 0.0)):
+                    return [(20.0, 50.0, 100.0), (200.0, 0.0, 100.0)]
+                return None
+
+        env.planner = FakePlanner()
+
+        success = env._try_replan_to_rejoin("path_drift")
+
+        self.assertTrue(success)
+        self.assertEqual(env.episode_replan_to_rejoin_successes, 1)
+        self.assertEqual(env.global_astar_path[-1], (300.0, 0.0, 100.0))
+        self.assertEqual(env.current_wp_idx, 1)
+        self.assertEqual(env.last_replan_event, "path_drift:to_rejoin")
+
     def test_expert_switches_to_emergency_when_normal_candidates_are_invalid(self):
         env = object.__new__(GuidedDroneEnvV25)
         env.config = self.config
         normal_action = np.array([0.0, 0.0, 0.0], dtype=float)
         emergency_action = np.array([1.0, -1.0, 0.0], dtype=float)
 
-        def fake_candidates(emergency=False):
+        def fake_candidates(emergency=False, mild=False):
             return [emergency_action] if emergency else [normal_action]
 
         def fake_evaluate(action):
@@ -454,7 +635,7 @@ class V25TrueWorldTests(unittest.TestCase):
         zero_action = np.array([0.0, 0.0, 0.0], dtype=float)
         candidate_action = np.array([0.65, 0.0, 0.0], dtype=float)
 
-        def fake_candidates(emergency=False):
+        def fake_candidates(emergency=False, mild=False):
             return [] if emergency else [zero_action, candidate_action]
 
         def fake_evaluate(action):
@@ -476,16 +657,57 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertEqual(mode, "cautious")
         self.assertTrue(np.allclose(action, zero_action))
 
+    def test_gradual_warning_uses_mild_candidates_and_cautious_trend_mode(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        zero_action = np.array([0.0, 0.0, 0.0], dtype=float)
+        mild_action = np.array([0.35, 0.0, 0.0], dtype=float)
+        calls = []
+
+        def fake_candidates(emergency=False, mild=False):
+            calls.append((emergency, mild))
+            if emergency:
+                return [np.array([1.0, -1.0, 0.0], dtype=float)]
+            return [zero_action, mild_action] if mild else [np.array([0.65, 0.0, 0.0], dtype=float)]
+
+        def fake_evaluate(action):
+            is_zero = np.allclose(action, zero_action)
+            is_mild = np.allclose(action, mild_action)
+            return {
+                "action": np.asarray(action, dtype=float),
+                "score": 1.0 if is_zero else 0.5,
+                "hard_violation_count": 0,
+                "max_risk": 0.30 if is_zero else (0.25 if is_mild else 0.10),
+                "final_path_error": 0.0,
+                "final_goal_dist": 0.0,
+            }
+
+        env._expert_candidate_actions = fake_candidates
+        env._evaluate_expert_rollout = fake_evaluate
+
+        action, mode = env._select_expert_action(gradual_warning=True)
+
+        self.assertEqual(mode, "cautious_trend")
+        self.assertTrue(np.allclose(action, mild_action))
+        self.assertIn((False, True), calls)
+
     def test_apas_searches_for_a_safer_residual_command(self):
         env = object.__new__(GuidedDroneEnvV25)
         env.config = self.config
+        env.config.v25_apas_segment_check_enabled = False
         env.min_clearance_agl = self.config.rl_min_clearance_agl
         env.max_clearance_agl = self.config.rl_max_clearance_agl
         calls = []
 
         def fake_transition(heading, speed, agl):
             calls.append((heading, speed, agl))
-            return {"safe": len(calls) >= 2}
+            return {
+                "safe": len(calls) >= 2,
+                "position_xyz": np.array([float(len(calls)), 0.0, 100.0], dtype=float),
+                "p_crash": 0.0,
+                "power_w": self.config.base_power,
+                "destructive_core_hit": False,
+            }
 
         env._simulate_true_transition = fake_transition
         env._transition_is_safe_for_apas = lambda transition: transition["safe"]
@@ -494,6 +716,145 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertTrue(transition["safe"])
         self.assertTrue(info["apas_intervened"])
         self.assertGreater(info["apas_speed_reduction_mps"], 0.0)
+
+    def test_apas_segment_filter_rejects_core_crossing_candidate(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.config.v25_apas_segment_check_enabled = True
+        env.current_pos = np.array([0.0, 0.0, 100.0], dtype=float)
+        env.current_time = 77.0
+        env.min_clearance_agl = self.config.rl_min_clearance_agl
+        env.max_clearance_agl = self.config.rl_max_clearance_agl
+
+        calls = []
+
+        def fake_transition(heading, speed, agl):
+            calls.append(heading)
+            if len(calls) == 1:
+                return {
+                    "position_xyz": np.array([100.0, 0.0, 100.0], dtype=float),
+                    "p_crash": 0.0,
+                    "power_w": self.config.base_power,
+                    "destructive_core_hit": False,
+                }
+            return {
+                "position_xyz": np.array([0.0, 100.0, 100.0], dtype=float),
+                "p_crash": 0.0,
+                "power_w": self.config.base_power,
+                "destructive_core_hit": False,
+            }
+
+        def fake_segment_probe(start_xyz, end_xyz, random_layer_time_s=None, samples=None):
+            if abs(float(end_xyz[0]) - 100.0) < 1e-6:
+                return {"max_risk_bonus": 0.9, "destructive_core_hit": True}
+            return {"max_risk_bonus": 0.0, "destructive_core_hit": False}
+
+        class FakeMap:
+            def is_collision(self, *args, **kwargs):
+                return False
+
+        class FakeEstimator:
+            map = FakeMap()
+
+        env.estimator = FakeEstimator()
+        env._current_nfz_list = lambda: []
+        env._simulate_true_transition = fake_transition
+        env._probe_random_layer_segment = fake_segment_probe
+
+        transition, info = env._simulate_apas_true_transition(10.0, 10.0, 50.0)
+
+        self.assertTrue(info["apas_intervened"])
+        self.assertEqual(info["apas_segment_rejections"], 1)
+        self.assertFalse(info["apas_no_valid_candidate"])
+        self.assertTrue(np.allclose(transition["position_xyz"], np.array([0.0, 100.0, 100.0])))
+
+    def test_stale_waypoint_skip_advances_to_downstream_nearest_point(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.global_astar_path = [
+            (0.0, 0.0, 100.0),
+            (100.0, 0.0, 100.0),
+            (200.0, 0.0, 100.0),
+            (300.0, 0.0, 100.0),
+        ]
+        env.current_wp_idx = 0
+        env.episode_stale_waypoint_skips = 0
+        env.episode_stale_waypoint_skip_delta = 0
+        env._suppress_waypoint_skip_metrics = False
+
+        env._refresh_wp_index(np.array([205.0, 20.0], dtype=float))
+
+        self.assertEqual(env.current_wp_idx, 2)
+        self.assertEqual(env.episode_stale_waypoint_skips, 1)
+        self.assertEqual(env.episode_stale_waypoint_skip_delta, 2)
+
+    def test_stale_waypoint_skip_respects_corridor_radius(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.global_astar_path = [
+            (0.0, 0.0, 100.0),
+            (100.0, 0.0, 100.0),
+            (200.0, 0.0, 100.0),
+            (300.0, 0.0, 100.0),
+        ]
+        env.current_wp_idx = 0
+        env.episode_stale_waypoint_skips = 0
+        env.episode_stale_waypoint_skip_delta = 0
+        env._suppress_waypoint_skip_metrics = False
+        self.config.v25_stale_waypoint_corridor_m = 50.0
+
+        env._refresh_wp_index(np.array([205.0, 120.0], dtype=float))
+
+        self.assertEqual(env.current_wp_idx, 0)
+        self.assertEqual(env.episode_stale_waypoint_skips, 0)
+
+    def test_risk_membrane_detects_front_wall_and_side_gap(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        env.config.v25_sensor_mode = "circle_oracle"
+        env.current_pos = np.array([0.0, 0.0, 100.0], dtype=float)
+        env.current_heading = 0.0
+        env.current_time = 0.0
+
+        sample_points = []
+        for angle_deg in (-30.0, -15.0, 0.0, 15.0, 30.0):
+            rad = np.radians(angle_deg)
+            sample_points.append(500.0 * np.array([np.cos(rad), np.sin(rad)], dtype=float))
+        env._circle_oracle_sample_points = lambda: sample_points
+
+        class FakeStorm:
+            def danger_at(self, *args):
+                return 0.0
+
+        class FakeDisruptions:
+            destructive_storm = FakeStorm()
+
+            def risk_bonus_at(self, x, y, t_s):
+                return 1.0
+
+        env.disruptions = FakeDisruptions()
+
+        summary = env._risk_membrane_summary()
+
+        self.assertEqual(summary["risk_membrane_wall_ahead"], 1.0)
+        self.assertEqual(summary["risk_membrane_no_escape_gap"], 0.0)
+        self.assertGreaterEqual(summary["risk_membrane_best_gap_width_deg"], self.config.v25_risk_membrane_min_gap_width_deg)
+
+    def test_risk_membrane_action_steers_toward_best_gap(self):
+        env = object.__new__(GuidedDroneEnvV25)
+        env.config = self.config
+        local_hazard = {
+            "risk_membrane_wall_ahead": 1.0,
+            "risk_membrane_no_escape_gap": 0.0,
+            "risk_membrane_best_gap_angle_deg": 45.0,
+            "risk_membrane_best_gap_width_deg": 45.0,
+        }
+
+        action, mode = env._risk_membrane_action(local_hazard)
+
+        self.assertEqual(mode, "band_avoidance")
+        self.assertGreater(action[0], 0.0)
+        self.assertLess(action[1], 0.0)
 
 
 if __name__ == "__main__":
