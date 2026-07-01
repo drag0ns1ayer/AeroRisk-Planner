@@ -5,6 +5,7 @@ import numpy as np
 from configs.config import SimulationConfig
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
+from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
     compute_intervention_need,
@@ -193,6 +194,26 @@ class V25TrueWorldTests(unittest.TestCase):
         env.reset(seed=42)
 
         self.assertEqual(len(env.local_hazard_history), 0)
+
+    def test_episode_metric_reset_helpers_clear_key_v25_counters(self):
+        class Dummy:
+            pass
+
+        target = Dummy()
+        target.episode_apas_interventions = 99
+        target.episode_eval_adjusted_energy_j = 123.0
+        target.episode_replans = 3
+        target.replan_cooldown_steps_remaining = 7
+        target.last_replan_event = "path_drift"
+
+        reset_v25_episode_metrics(target)
+        reset_v25_runtime_trackers(target)
+
+        self.assertEqual(target.episode_apas_interventions, 0)
+        self.assertEqual(target.episode_eval_adjusted_energy_j, 0.0)
+        self.assertEqual(target.episode_replans, 0)
+        self.assertEqual(target.replan_cooldown_steps_remaining, 0)
+        self.assertEqual(target.last_replan_event, "none")
 
     def test_true_wind_changes_ground_track(self):
         dynamics = TrueWorldDynamicsV25(self.config)

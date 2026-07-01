@@ -11,6 +11,7 @@ from configs.config import SimulationConfig
 from rl_env.drone_env import GuidedDroneEnv
 from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
+from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
 
@@ -94,67 +95,8 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         self.do_no_harm_cooldown_steps_remaining = 0
         self.last_do_no_harm_active = False
         self.last_do_no_harm_reason = "none"
-        self.episode_do_no_harm_events = 0
-        self.episode_do_no_harm_suppressed_steps = 0
-        self.episode_do_no_harm_cooldown_steps = 0
-
-        self.episode_disturbance_max = 0.0
-        self.episode_disturbance_sum = 0.0
-        self.episode_disturbance_steps = 0
-        self.episode_residual_action_sum = 0.0
-        self.episode_residual_heading_abs_sum = 0.0
-        self.episode_residual_speed_abs_sum = 0.0
-        self.episode_residual_agl_abs_sum = 0.0
-        self.episode_action_delta_sum = 0.0
-        self.episode_intervention_need_sum = 0.0
-        self.episode_unneeded_residual_sum = 0.0
-        self.episode_needed_residual_sum = 0.0
-        self.episode_apas_interventions = 0
-        self.episode_apas_segment_rejections = 0
-        self.episode_apas_no_valid_candidates = 0
-        self.episode_stale_waypoint_skips = 0
-        self.episode_stale_waypoint_skip_delta = 0
-        self.episode_destructive_core_hits = 0
-        self.episode_unproductive_residual_cost_sum = 0.0
-        self.episode_progress_shortfall_sum = 0.0
-        self.episode_apas_intervention_cost_sum = 0.0
-        self.episode_speed_residual_cost_sum = 0.0
-        self.episode_residual_gate_sum = 0.0
-        self.episode_local_hazard_need_sum = 0.0
-        self.episode_local_hazard_cost_sum = 0.0
-        self.episode_local_hazard_trend_need_sum = 0.0
-        self.episode_local_hazard_forward_delta_sum = 0.0
-        self.episode_local_hazard_positive_trend_steps = 0
-        self.episode_eval_maneuver_extra_energy_j = 0.0
-        self.episode_eval_safety_intervention_burden = 0.0
-        self.episode_eval_adjusted_energy_j = 0.0
-        self.episode_expert_normal_steps = 0
-        self.episode_expert_cautious_steps = 0
-        self.episode_expert_cautious_trend_steps = 0
-        self.episode_expert_avoiding_steps = 0
-        self.episode_expert_emergency_steps = 0
-        self.episode_expert_band_avoidance_steps = 0
-        self.episode_expert_pre_emergency_slow_steps = 0
-        self.episode_expert_recovering_steps = 0
-        self.episode_expert_rejoin_actions = 0
-        self.episode_expert_rejoin_attempts = 0
-        self.episode_expert_rejoin_rejected = 0
-        self.episode_replans = 0
-        self.episode_replan_successes = 0
-        self.episode_replan_failures = 0
-        self.episode_replan_to_rejoin_successes = 0
-        self.episode_replan_to_goal_successes = 0
-        self.episode_replan_path_drift_triggers = 0
-        self.episode_replan_low_progress_triggers = 0
-        self.episode_replan_no_valid_triggers = 0
-        self.replan_cooldown_steps_remaining = 0
-        self.consecutive_replan_low_progress_steps = 0
-        self.apas_no_valid_linger_steps = 0
-        self.last_replan_event = "none"
-        self.consecutive_avoiding_steps = 0
-        self.consecutive_recovering_steps = 0
-        self.consecutive_cautious_steps = 0
-        self.consecutive_low_progress_steps = 0
+        reset_v25_episode_metrics(self)
+        reset_v25_runtime_trackers(self)
 
     @classmethod
     def _sensor_feature_count(cls, config: SimulationConfig) -> int:
@@ -197,66 +139,8 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         self.do_no_harm_cooldown_steps_remaining = 0
         self.last_do_no_harm_active = False
         self.last_do_no_harm_reason = "none"
-        self.episode_do_no_harm_events = 0
-        self.episode_do_no_harm_suppressed_steps = 0
-        self.episode_do_no_harm_cooldown_steps = 0
-        self.episode_disturbance_max = 0.0
-        self.episode_disturbance_sum = 0.0
-        self.episode_disturbance_steps = 0
-        self.episode_residual_action_sum = 0.0
-        self.episode_residual_heading_abs_sum = 0.0
-        self.episode_residual_speed_abs_sum = 0.0
-        self.episode_residual_agl_abs_sum = 0.0
-        self.episode_action_delta_sum = 0.0
-        self.episode_intervention_need_sum = 0.0
-        self.episode_unneeded_residual_sum = 0.0
-        self.episode_needed_residual_sum = 0.0
-        self.episode_apas_interventions = 0
-        self.episode_apas_segment_rejections = 0
-        self.episode_apas_no_valid_candidates = 0
-        self.episode_stale_waypoint_skips = 0
-        self.episode_stale_waypoint_skip_delta = 0
-        self.episode_destructive_core_hits = 0
-        self.episode_unproductive_residual_cost_sum = 0.0
-        self.episode_progress_shortfall_sum = 0.0
-        self.episode_apas_intervention_cost_sum = 0.0
-        self.episode_speed_residual_cost_sum = 0.0
-        self.episode_residual_gate_sum = 0.0
-        self.episode_local_hazard_need_sum = 0.0
-        self.episode_local_hazard_cost_sum = 0.0
-        self.episode_local_hazard_trend_need_sum = 0.0
-        self.episode_local_hazard_forward_delta_sum = 0.0
-        self.episode_local_hazard_positive_trend_steps = 0
-        self.episode_eval_maneuver_extra_energy_j = 0.0
-        self.episode_eval_safety_intervention_burden = 0.0
-        self.episode_eval_adjusted_energy_j = 0.0
-        self.episode_expert_normal_steps = 0
-        self.episode_expert_cautious_steps = 0
-        self.episode_expert_cautious_trend_steps = 0
-        self.episode_expert_avoiding_steps = 0
-        self.episode_expert_emergency_steps = 0
-        self.episode_expert_band_avoidance_steps = 0
-        self.episode_expert_pre_emergency_slow_steps = 0
-        self.episode_expert_recovering_steps = 0
-        self.episode_expert_rejoin_actions = 0
-        self.episode_expert_rejoin_attempts = 0
-        self.episode_expert_rejoin_rejected = 0
-        self.episode_replans = 0
-        self.episode_replan_successes = 0
-        self.episode_replan_failures = 0
-        self.episode_replan_to_rejoin_successes = 0
-        self.episode_replan_to_goal_successes = 0
-        self.episode_replan_path_drift_triggers = 0
-        self.episode_replan_low_progress_triggers = 0
-        self.episode_replan_no_valid_triggers = 0
-        self.replan_cooldown_steps_remaining = 0
-        self.consecutive_replan_low_progress_steps = 0
-        self.apas_no_valid_linger_steps = 0
-        self.last_replan_event = "none"
-        self.consecutive_avoiding_steps = 0
-        self.consecutive_recovering_steps = 0
-        self.consecutive_cautious_steps = 0
-        self.consecutive_low_progress_steps = 0
+        reset_v25_episode_metrics(self)
+        reset_v25_runtime_trackers(self)
         info["v25_mode"] = "predictable_astar_shared_true_world_residual_rl"
         info["random_layer_seed"] = episode_seed
         return self._get_obs(), info
