@@ -67,3 +67,57 @@ def select_expert_action_from_evaluations(
         ),
     )
     return np.asarray(best["action"], dtype=float), "emergency"
+
+
+def score_expert_rollout_step(
+    *,
+    rollout_step: int,
+    action: np.ndarray,
+    p_crash: float,
+    path_error_m: float,
+    power_w: float,
+    progress_m: float,
+    progress_shortfall_m: float,
+    core_or_high_risk: bool,
+    collision_or_overload: bool,
+    config: SimulationConfig,
+) -> tuple[float, int]:
+    step_weight = 1.0 + 0.20 * int(rollout_step)
+    score = step_weight * (
+        float(config.v25_expert_risk_gain) * (float(p_crash) ** 2)
+        + float(config.v25_expert_path_error_gain) * float(path_error_m)
+        + float(config.v25_expert_power_gain) * max(0.0, float(power_w) - float(config.base_power))
+        + float(config.v25_expert_action_gain) * float(np.linalg.norm(action))
+        + float(config.v25_expert_progress_gain) * float(progress_shortfall_m)
+        - float(config.v25_expert_progress_gain) * float(progress_m)
+    )
+
+    hard_violation_count = 0
+    if bool(core_or_high_risk):
+        hard_violation_count += 1
+        score += float(config.v25_expert_core_penalty) * step_weight
+    if bool(collision_or_overload):
+        hard_violation_count += 1
+        score += float(config.v25_expert_core_penalty) * step_weight
+
+    return float(score), int(hard_violation_count)
+
+
+def finalize_expert_rollout_score(
+    *,
+    score: float,
+    final_path_error_m: float,
+    final_goal_dist_m: float,
+    initial_goal_dist_m: float,
+    hard_violation_count: int,
+    config: SimulationConfig,
+) -> float:
+    terminal_goal_shortfall = max(0.0, float(final_goal_dist_m) - float(initial_goal_dist_m))
+    total = (
+        float(score)
+        + float(config.v25_expert_final_path_error_gain) * float(final_path_error_m)
+        + float(config.v25_expert_final_progress_gain) * terminal_goal_shortfall
+    )
+    if int(hard_violation_count):
+        total += float(config.v25_expert_hard_constraint_penalty) * int(hard_violation_count)
+    return float(total)

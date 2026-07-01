@@ -21,7 +21,12 @@ from v25.apas_safety import (
 from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
-from v25.expert_policy import expert_candidate_actions, select_expert_action_from_evaluations
+from v25.expert_policy import (
+    expert_candidate_actions,
+    finalize_expert_rollout_score,
+    score_expert_rollout_step,
+    select_expert_action_from_evaluations,
+)
 from v25.local_hazard import (
     empty_local_hazard_summary,
     local_hazard_gradual_warning,
@@ -1160,21 +1165,20 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
                 )
                 overload = power > self.config.max_power * self.config.rl_overload_power_ratio
 
-                step_weight = 1.0 + 0.20 * rollout_step
-                total_score += step_weight * (
-                    self.config.v25_expert_risk_gain * (p_crash ** 2)
-                    + self.config.v25_expert_path_error_gain * path_error
-                    + self.config.v25_expert_power_gain * max(0.0, power - self.config.base_power)
-                    + self.config.v25_expert_action_gain * float(np.linalg.norm(action))
-                    + self.config.v25_expert_progress_gain * progress_shortfall
-                    - self.config.v25_expert_progress_gain * progress
+                step_score, step_hard_violations = score_expert_rollout_step(
+                    rollout_step=rollout_step,
+                    action=action,
+                    p_crash=p_crash,
+                    path_error_m=path_error,
+                    power_w=power,
+                    progress_m=progress,
+                    progress_shortfall_m=progress_shortfall,
+                    core_or_high_risk=core_hit or p_crash > float(self.config.v25_expert_hard_risk_threshold),
+                    collision_or_overload=collision or overload,
+                    config=self.config,
                 )
-                if core_hit or p_crash > float(self.config.v25_expert_hard_risk_threshold):
-                    hard_violation_count += 1
-                    total_score += self.config.v25_expert_core_penalty * step_weight
-                if collision or overload:
-                    hard_violation_count += 1
-                    total_score += self.config.v25_expert_core_penalty * step_weight
+                total_score += step_score
+                hard_violation_count += step_hard_violations
 
                 self.current_pos = new_pos
                 self.current_heading = float(transition["heading_deg"])
@@ -1183,13 +1187,14 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
                 self.current_time += self.dt
                 self._refresh_wp_index(self.current_pos[:2])
                 previous_goal_dist = new_goal_dist
-            terminal_goal_shortfall = max(0.0, final_goal_dist - initial_goal_dist)
-            total_score += (
-                self.config.v25_expert_final_path_error_gain * final_path_error
-                + self.config.v25_expert_final_progress_gain * terminal_goal_shortfall
+            total_score = finalize_expert_rollout_score(
+                score=total_score,
+                final_path_error_m=final_path_error,
+                final_goal_dist_m=final_goal_dist,
+                initial_goal_dist_m=initial_goal_dist,
+                hard_violation_count=hard_violation_count,
+                config=self.config,
             )
-            if hard_violation_count:
-                total_score += self.config.v25_expert_hard_constraint_penalty * hard_violation_count
         finally:
             (
                 self.current_pos,

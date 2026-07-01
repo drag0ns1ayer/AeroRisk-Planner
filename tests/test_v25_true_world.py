@@ -7,7 +7,12 @@ from v25.apas_safety import build_apas_candidate_info, generate_apas_candidates,
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
-from v25.expert_policy import expert_candidate_actions, select_expert_action_from_evaluations
+from v25.expert_policy import (
+    expert_candidate_actions,
+    finalize_expert_rollout_score,
+    score_expert_rollout_step,
+    select_expert_action_from_evaluations,
+)
 from v25.risk_membrane import compute_risk_membrane_summary, risk_membrane_action
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
@@ -808,6 +813,45 @@ class V25TrueWorldTests(unittest.TestCase):
 
         self.assertEqual(mode, "emergency")
         self.assertTrue(np.allclose(action, emergency_action))
+
+    def test_expert_rollout_score_helpers_penalize_hard_violations(self):
+        safe_score, safe_violations = score_expert_rollout_step(
+            rollout_step=0,
+            action=np.zeros(3, dtype=float),
+            p_crash=0.1,
+            path_error_m=0.0,
+            power_w=self.config.base_power,
+            progress_m=10.0,
+            progress_shortfall_m=0.0,
+            core_or_high_risk=False,
+            collision_or_overload=False,
+            config=self.config,
+        )
+        unsafe_score, unsafe_violations = score_expert_rollout_step(
+            rollout_step=0,
+            action=np.zeros(3, dtype=float),
+            p_crash=0.9,
+            path_error_m=0.0,
+            power_w=self.config.base_power,
+            progress_m=10.0,
+            progress_shortfall_m=0.0,
+            core_or_high_risk=True,
+            collision_or_overload=False,
+            config=self.config,
+        )
+        final_score = finalize_expert_rollout_score(
+            score=unsafe_score,
+            final_path_error_m=0.0,
+            final_goal_dist_m=100.0,
+            initial_goal_dist_m=90.0,
+            hard_violation_count=unsafe_violations,
+            config=self.config,
+        )
+
+        self.assertEqual(safe_violations, 0)
+        self.assertEqual(unsafe_violations, 1)
+        self.assertGreater(unsafe_score, safe_score)
+        self.assertGreater(final_score, unsafe_score + self.config.v25_expert_hard_constraint_penalty * 0.9)
 
     def test_apas_searches_for_a_safer_residual_command(self):
         env = object.__new__(GuidedDroneEnvV25)
