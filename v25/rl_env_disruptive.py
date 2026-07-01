@@ -9,6 +9,14 @@ from gymnasium import spaces
 
 from configs.config import SimulationConfig
 from rl_env.drone_env import GuidedDroneEnv
+from v25.apas_safety import (
+    apas_candidate_score,
+    build_apas_candidate_info,
+    default_apas_info,
+    empty_segment_probe,
+    probe_random_layer_segment,
+    segment_probe_is_safe,
+)
 from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
@@ -640,24 +648,17 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         """
         disruptions = getattr(self, "disruptions", None)
         if disruptions is None:
-            return {"max_risk_bonus": 0.0, "destructive_core_hit": False}
+            return empty_segment_probe()
 
-        sample_count = int(samples if samples is not None else self.config.v25_segment_probe_samples)
-        sample_count = max(1, sample_count)
         probe_time = float(self.current_time if random_layer_time_s is None else random_layer_time_s)
-        start = np.asarray(start_xyz, dtype=float)
-        end = np.asarray(end_xyz, dtype=float)
-
-        max_risk_bonus = 0.0
-        core_hit = False
-        for idx in range(sample_count + 1):
-            alpha = idx / sample_count
-            point = (1.0 - alpha) * start + alpha * end
-            x = float(point[0])
-            y = float(point[1])
-            max_risk_bonus = max(max_risk_bonus, float(disruptions.risk_bonus_at(x, y, probe_time)))
-            core_hit = core_hit or bool(disruptions.core_hit(x, y, probe_time))
-        return {"max_risk_bonus": float(max_risk_bonus), "destructive_core_hit": bool(core_hit)}
+        return probe_random_layer_segment(
+            start_xyz=start_xyz,
+            end_xyz=end_xyz,
+            probe_time_s=probe_time,
+            sample_count=int(samples if samples is not None else self.config.v25_segment_probe_samples),
+            risk_bonus_at=disruptions.risk_bonus_at,
+            core_hit_at=disruptions.core_hit,
+        )
 
     def _transition_is_safe_for_apas(self, transition: dict) -> bool:
         new_pos = np.asarray(transition["position_xyz"], dtype=float)
@@ -676,7 +677,7 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
 
     def _transition_segment_is_safe_for_apas(self, transition: dict) -> tuple[bool, dict]:
         if not bool(getattr(self.config, "v25_apas_segment_check_enabled", True)):
-            return True, {"max_risk_bonus": 0.0, "destructive_core_hit": False}
+            return True, empty_segment_probe()
 
         segment_probe = self._probe_random_layer_segment(
             np.asarray(self.current_pos, dtype=float),
@@ -684,11 +685,11 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
             random_layer_time_s=float(self.current_time),
             samples=int(self.config.v25_apas_segment_probe_samples),
         )
-        segment_core_hit = bool(segment_probe["destructive_core_hit"])
-        segment_high_risk = (
-            float(segment_probe["max_risk_bonus"]) > float(self.config.v25_apas_segment_risk_threshold)
-        )
-        return not (segment_core_hit or segment_high_risk), segment_probe
+        return segment_probe_is_safe(
+            segment_probe,
+            enabled=True,
+            risk_threshold=float(self.config.v25_apas_segment_risk_threshold),
+        ), segment_probe
 
     def _simulate_apas_true_transition(
         self,
@@ -726,24 +727,18 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
                     if not endpoint_safe:
                         endpoint_rejections += 1
 
-                    candidate_score = (
-                        1.0 if bool(segment_probe["destructive_core_hit"]) else 0.0,
-                        float(segment_probe["max_risk_bonus"]),
-                        float(transition["p_crash"]),
-                        candidate_index,
+                    candidate_score = apas_candidate_score(segment_probe, transition, candidate_index)
+                    candidate_info = build_apas_candidate_info(
+                        candidate_index=candidate_index,
+                        heading_offset_deg=float(heading_offset),
+                        desired_airspeed_mps=desired_airspeed_mps,
+                        test_speed_mps=test_speed,
+                        desired_agl_m=desired_agl_m,
+                        test_agl_m=test_agl,
+                        segment_rejections=segment_rejections,
+                        endpoint_rejections=endpoint_rejections,
+                        segment_probe=segment_probe,
                     )
-                    candidate_info = {
-                        "apas_intervened": candidate_index > 0,
-                        "apas_heading_offset_deg": float(heading_offset),
-                        "apas_speed_reduction_mps": float(max(0.0, desired_airspeed_mps - test_speed)),
-                        "apas_agl_increment_m": float(test_agl - desired_agl_m),
-                        "apas_candidate_index": candidate_index,
-                        "apas_segment_rejections": int(segment_rejections),
-                        "apas_endpoint_rejections": int(endpoint_rejections),
-                        "apas_no_valid_candidate": False,
-                        "apas_segment_max_risk_bonus": float(segment_probe["max_risk_bonus"]),
-                        "apas_segment_core_hit": bool(segment_probe["destructive_core_hit"]),
-                    }
                     if least_bad is None or candidate_score < least_bad[0]:
                         least_bad = (candidate_score, transition, candidate_info)
 
@@ -765,18 +760,13 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
             }
             return fallback_transition, fallback_info
 
-        return None, {
-            "apas_intervened": True,
-            "apas_heading_offset_deg": 0.0,
-            "apas_speed_reduction_mps": 0.0,
-            "apas_agl_increment_m": 0.0,
-            "apas_candidate_index": candidate_index,
-            "apas_segment_rejections": int(segment_rejections),
-            "apas_endpoint_rejections": int(endpoint_rejections),
-            "apas_no_valid_candidate": True,
-            "apas_segment_max_risk_bonus": 0.0,
-            "apas_segment_core_hit": False,
-        }
+        info = default_apas_info(candidate_index=candidate_index, intervened=True)
+        info.update(
+            apas_segment_rejections=int(segment_rejections),
+            apas_endpoint_rejections=int(endpoint_rejections),
+            apas_no_valid_candidate=True,
+        )
+        return None, info
 
     def local_avoidance_expert_action(self) -> np.ndarray:
         """
@@ -1325,18 +1315,7 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
 
         old_pos = np.asarray(self.current_pos, dtype=float).copy()
         old_goal_dist = float(np.linalg.norm(self.goal_pos[:2] - old_pos[:2]))
-        apas_info = {
-            "apas_intervened": False,
-            "apas_heading_offset_deg": 0.0,
-            "apas_speed_reduction_mps": 0.0,
-            "apas_agl_increment_m": 0.0,
-            "apas_candidate_index": 0,
-            "apas_segment_rejections": 0,
-            "apas_endpoint_rejections": 0,
-            "apas_no_valid_candidate": False,
-            "apas_segment_max_risk_bonus": 0.0,
-            "apas_segment_core_hit": False,
-        }
+        apas_info = default_apas_info()
         if self.config.rl_enable_apas:
             transition, apas_info = self._simulate_apas_true_transition(
                 commanded_heading,
