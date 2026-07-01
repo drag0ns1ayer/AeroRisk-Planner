@@ -12,6 +12,12 @@ from rl_env.drone_env import GuidedDroneEnv
 from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
+from v25.local_hazard import (
+    empty_local_hazard_summary,
+    local_hazard_gradual_warning,
+    local_hazard_history_features,
+    local_hazard_memory_item,
+)
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
 
@@ -503,74 +509,16 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         return radar_values
 
     def _empty_local_hazard_summary(self) -> dict[str, float]:
-        return {
-            "hazard_need": 0.0,
-            "base_hazard_need": 0.0,
-            "max_danger": 0.0,
-            "mean_danger": 0.0,
-            "forward_danger": 0.0,
-            "nearest_closeness": 0.0,
-            "nearest_forward_alignment": 0.0,
-            "trend_need": 0.0,
-            "delta_max_danger": 0.0,
-            "delta_forward_danger": 0.0,
-            "delta_nearest_closeness": 0.0,
-            "gradual_warning": 0.0,
-            "risk_membrane_wall_ahead": 0.0,
-            "risk_membrane_no_escape_gap": 0.0,
-            "risk_membrane_front_blocked_width_deg": 0.0,
-            "risk_membrane_best_gap_angle_deg": 0.0,
-            "risk_membrane_best_gap_width_deg": 0.0,
-            "risk_membrane_best_gap_side": 0.0,
-            "risk_membrane_max_extended_risk": 0.0,
-        }
+        return empty_local_hazard_summary()
 
     def _local_hazard_history_features(self, current: dict[str, float]) -> dict[str, float]:
-        if not self.local_hazard_history:
-            return {
-                "trend_need": 0.0,
-                "delta_max_danger": 0.0,
-                "delta_forward_danger": 0.0,
-                "delta_nearest_closeness": 0.0,
-            }
-
-        oldest = self.local_hazard_history[0]
-        delta_max = float(current["max_danger"] - oldest["max_danger"])
-        delta_forward = float(current["forward_danger"] - oldest["forward_danger"])
-        delta_near = float(current["nearest_closeness"] - oldest["nearest_closeness"])
-        positive_signal = max(0.0, delta_forward) + 0.75 * max(0.0, delta_max) + 0.50 * max(0.0, delta_near)
-        threshold = float(max(self.config.v25_local_hazard_trend_threshold, 1e-6))
-        trend_need = float(np.clip(positive_signal / (4.0 * threshold), 0.0, 1.0))
-        return {
-            "trend_need": trend_need,
-            "delta_max_danger": delta_max,
-            "delta_forward_danger": delta_forward,
-            "delta_nearest_closeness": delta_near,
-        }
+        return local_hazard_history_features(current, list(self.local_hazard_history), self.config)
 
     def _remember_local_hazard(self, summary: dict[str, float]) -> None:
-        self.local_hazard_history.append(
-            {
-                "max_danger": float(summary.get("max_danger", 0.0)),
-                "forward_danger": float(summary.get("forward_danger", 0.0)),
-                "nearest_closeness": float(summary.get("nearest_closeness", 0.0)),
-            }
-        )
+        self.local_hazard_history.append(local_hazard_memory_item(summary))
 
     def _local_hazard_gradual_warning(self, summary: dict[str, float]) -> float:
-        if float(summary.get("base_hazard_need", summary.get("hazard_need", 0.0))) >= float(
-            self.config.v25_expert_activation_hazard
-        ):
-            return 0.0
-        if max(float(summary.get("max_danger", 0.0)), float(summary.get("forward_danger", 0.0))) >= float(
-            self.config.v25_expert_hard_risk_threshold
-        ):
-            return 0.0
-        if float(summary.get("trend_need", 0.0)) < float(self.config.v25_expert_trend_warning_need):
-            return 0.0
-        if float(summary.get("delta_forward_danger", 0.0)) < float(self.config.v25_expert_trend_forward_delta):
-            return 0.0
-        return 1.0
+        return local_hazard_gradual_warning(summary, self.config)
 
     def _local_hazard_summary(self) -> dict[str, float]:
         if self.disruptions is None:
