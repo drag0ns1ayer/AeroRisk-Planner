@@ -18,6 +18,7 @@ from v25.local_hazard import (
     local_hazard_history_features,
     local_hazard_memory_item,
 )
+from v25.risk_membrane import compute_risk_membrane_summary, empty_risk_membrane_summary
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
 
@@ -380,108 +381,21 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
             or not bool(getattr(self.config, "v25_risk_membrane_enabled", True))
             or getattr(self.config, "v25_sensor_mode", "sector_radar") != "circle_oracle"
         ):
-            return {
-                "risk_membrane_wall_ahead": 0.0,
-                "risk_membrane_no_escape_gap": 0.0,
-                "risk_membrane_front_blocked_width_deg": 0.0,
-                "risk_membrane_best_gap_angle_deg": 0.0,
-                "risk_membrane_best_gap_width_deg": 0.0,
-                "risk_membrane_best_gap_side": 0.0,
-                "risk_membrane_max_extended_risk": 0.0,
-            }
+            return empty_risk_membrane_summary()
 
-        origin = np.asarray(self.current_pos[:2], dtype=float)
-        radius_m = float(self.config.v25_radar_radius_m)
-        heading_rad = math.radians(float(self.current_heading))
-        angle_min = float(self.config.v25_risk_membrane_angle_min_deg)
-        angle_max = float(self.config.v25_risk_membrane_angle_max_deg)
-        angle_step = float(self.config.v25_risk_membrane_angle_step_deg)
-        angle_bins = np.arange(angle_min, angle_max + 0.5 * angle_step, angle_step, dtype=float)
-        radial_bins = np.linspace(
-            radius_m / max(int(self.config.v25_risk_membrane_radial_bins), 1),
-            radius_m,
-            int(self.config.v25_risk_membrane_radial_bins),
-            dtype=float,
+        def danger_at(x: float, y: float, t_s: float) -> float:
+            risk_bonus = float(self.disruptions.risk_bonus_at(x, y, t_s))
+            storm_danger = float(self.disruptions.destructive_storm.danger_at(x, y, t_s))
+            return max(risk_bonus, storm_danger)
+
+        return compute_risk_membrane_summary(
+            origin_xy=np.asarray(self.current_pos[:2], dtype=float),
+            heading_deg=float(self.current_heading),
+            current_time_s=float(self.current_time),
+            sample_points=self._circle_oracle_sample_points(),
+            danger_at=danger_at,
+            config=self.config,
         )
-        if len(angle_bins) == 0 or len(radial_bins) == 0:
-            return {
-                "risk_membrane_wall_ahead": 0.0,
-                "risk_membrane_no_escape_gap": 0.0,
-                "risk_membrane_front_blocked_width_deg": 0.0,
-                "risk_membrane_best_gap_angle_deg": 0.0,
-                "risk_membrane_best_gap_width_deg": 0.0,
-                "risk_membrane_best_gap_side": 0.0,
-                "risk_membrane_max_extended_risk": 0.0,
-            }
-
-        observations: list[tuple[float, float, float]] = []
-        for point in self._circle_oracle_sample_points():
-            offset = np.asarray(point - origin, dtype=float)
-            dist = float(np.linalg.norm(offset))
-            if dist < 1e-6:
-                continue
-            bearing = self._wrap_angle_deg(math.degrees(math.atan2(float(offset[1]), float(offset[0]))) - math.degrees(heading_rad))
-            if bearing < angle_min - angle_step or bearing > angle_max + angle_step:
-                continue
-            travel_dir = offset / dist
-            danger = float(self.disruptions.risk_bonus_at(float(point[0]), float(point[1]), self.current_time))
-            storm_danger = float(
-                self.disruptions.destructive_storm.danger_at(float(point[0]), float(point[1]), self.current_time)
-            )
-            danger = float(np.clip(max(danger, storm_danger), 0.0, 1.0))
-            if danger > 1e-6:
-                observations.append((dist, bearing, danger))
-
-        extended = np.zeros((len(radial_bins), len(angle_bins)), dtype=float)
-        lambda_r = max(float(self.config.v25_risk_membrane_lambda_r_m), 1e-6)
-        lambda_theta = max(float(self.config.v25_risk_membrane_lambda_theta_deg), 1e-6)
-        for obs_dist, obs_bearing, danger in observations:
-            for r_idx, r_center in enumerate(radial_bins):
-                radial_decay = math.exp(-abs(float(r_center) - obs_dist) / lambda_r)
-                for a_idx, angle_center in enumerate(angle_bins):
-                    angular_decay = math.exp(-abs(float(angle_center) - obs_bearing) / lambda_theta)
-                    extended[r_idx, a_idx] = max(extended[r_idx, a_idx], danger * radial_decay * angular_decay)
-
-        angular_risk = np.max(extended, axis=0) if len(extended) else np.zeros(len(angle_bins), dtype=float)
-        block_threshold = float(self.config.v25_risk_membrane_block_threshold)
-        blocked = angular_risk >= block_threshold
-        front_window = float(self.config.v25_risk_membrane_front_window_deg)
-        front_mask = np.abs(angle_bins) <= front_window
-        front_blocked_width = float(np.sum(blocked & front_mask) * angle_step)
-        wall_ahead = front_blocked_width >= float(self.config.v25_risk_membrane_wall_width_deg)
-
-        gaps: list[tuple[float, float, float]] = []
-        start_idx: Optional[int] = None
-        for idx, is_blocked in enumerate(blocked):
-            if not is_blocked and start_idx is None:
-                start_idx = idx
-            if (is_blocked or idx == len(blocked) - 1) and start_idx is not None:
-                end_idx = idx - 1 if is_blocked else idx
-                width = float((end_idx - start_idx + 1) * angle_step)
-                center = float(0.5 * (angle_bins[start_idx] + angle_bins[end_idx]))
-                if width >= float(self.config.v25_risk_membrane_min_gap_width_deg):
-                    gaps.append((center, width, float(abs(center))))
-                start_idx = None
-
-        if gaps:
-            best_gap = min(gaps, key=lambda item: (item[2] - 0.02 * item[1], item[2]))
-            best_gap_angle = float(best_gap[0])
-            best_gap_width = float(best_gap[1])
-            no_escape_gap = 0.0
-        else:
-            best_gap_angle = 0.0
-            best_gap_width = 0.0
-            no_escape_gap = 1.0 if wall_ahead else 0.0
-
-        return {
-            "risk_membrane_wall_ahead": float(bool(wall_ahead)),
-            "risk_membrane_no_escape_gap": float(no_escape_gap),
-            "risk_membrane_front_blocked_width_deg": front_blocked_width,
-            "risk_membrane_best_gap_angle_deg": best_gap_angle,
-            "risk_membrane_best_gap_width_deg": best_gap_width,
-            "risk_membrane_best_gap_side": float(np.sign(best_gap_angle)),
-            "risk_membrane_max_extended_risk": float(np.max(extended)) if extended.size else 0.0,
-        }
 
     def _sector_radar_features(self) -> list[float]:
         if self.disruptions is None:

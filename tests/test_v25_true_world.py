@@ -6,6 +6,7 @@ from configs.config import SimulationConfig
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
+from v25.risk_membrane import compute_risk_membrane_summary
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
     compute_intervention_need,
@@ -904,6 +905,25 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertEqual(summary["risk_membrane_wall_ahead"], 1.0)
         self.assertEqual(summary["risk_membrane_no_escape_gap"], 0.0)
         self.assertGreaterEqual(summary["risk_membrane_best_gap_width_deg"], self.config.v25_risk_membrane_min_gap_width_deg)
+
+    def test_risk_membrane_helper_detects_front_wall(self):
+        sample_points = []
+        for angle_deg in (-30.0, -15.0, 0.0, 15.0, 30.0):
+            rad = np.radians(angle_deg)
+            sample_points.append(500.0 * np.array([np.cos(rad), np.sin(rad)], dtype=float))
+
+        summary = compute_risk_membrane_summary(
+            origin_xy=np.array([0.0, 0.0], dtype=float),
+            heading_deg=0.0,
+            current_time_s=0.0,
+            sample_points=sample_points,
+            danger_at=lambda x, y, t: 1.0,
+            config=self.config,
+        )
+
+        self.assertEqual(summary["risk_membrane_wall_ahead"], 1.0)
+        self.assertEqual(summary["risk_membrane_no_escape_gap"], 0.0)
+        self.assertGreater(summary["risk_membrane_max_extended_risk"], 0.0)
 
     def test_risk_membrane_action_steers_toward_best_gap(self):
         env = object.__new__(GuidedDroneEnvV25)
