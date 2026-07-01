@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from configs.config import SimulationConfig
-from v25.apas_safety import build_apas_candidate_info, probe_random_layer_segment
+from v25.apas_safety import build_apas_candidate_info, generate_apas_candidates, probe_random_layer_segment
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
@@ -496,6 +496,24 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertEqual(info["apas_agl_increment_m"], 30.0)
         self.assertEqual(info["apas_segment_rejections"], 2)
         self.assertEqual(info["apas_segment_max_risk_bonus"], 0.4)
+
+    def test_apas_candidate_generation_preserves_first_nominal_candidate(self):
+        candidates = generate_apas_candidates(
+            desired_heading_deg=10.0,
+            desired_airspeed_mps=14.0,
+            desired_agl_m=80.0,
+            min_clearance_agl=30.0,
+            max_clearance_agl=200.0,
+            config=self.config,
+            wrap_angle=lambda angle: ((angle + 180.0) % 360.0) - 180.0,
+        )
+
+        self.assertGreater(len(candidates), 1)
+        self.assertEqual(candidates[0]["candidate_index"], 0)
+        self.assertEqual(candidates[0]["heading_deg"], 10.0)
+        self.assertEqual(candidates[0]["airspeed_mps"], 14.0)
+        self.assertEqual(candidates[0]["agl_m"], 80.0)
+        self.assertLess(candidates[1]["airspeed_mps"], candidates[0]["airspeed_mps"])
 
     def test_expert_uses_recovering_mode_when_low_risk_but_off_path(self):
         env = object.__new__(GuidedDroneEnvV25)

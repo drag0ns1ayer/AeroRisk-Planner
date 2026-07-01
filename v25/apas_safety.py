@@ -4,6 +4,8 @@ from typing import Callable
 
 import numpy as np
 
+from configs.config import SimulationConfig
+
 
 def empty_segment_probe() -> dict[str, float | bool]:
     return {"max_risk_bonus": 0.0, "destructive_core_hit": False}
@@ -96,3 +98,41 @@ def build_apas_candidate_info(
         "apas_segment_max_risk_bonus": float(segment_probe.get("max_risk_bonus", 0.0)),
         "apas_segment_core_hit": bool(segment_probe.get("destructive_core_hit", False)),
     }
+
+
+def generate_apas_candidates(
+    *,
+    desired_heading_deg: float,
+    desired_airspeed_mps: float,
+    desired_agl_m: float,
+    min_clearance_agl: float,
+    max_clearance_agl: float,
+    config: SimulationConfig,
+    wrap_angle: Callable[[float], float],
+) -> list[dict[str, float | int]]:
+    candidates: list[dict[str, float | int]] = []
+    candidate_index = 0
+    for agl_increment in config.v25_apas_agl_increments_m:
+        test_agl = float(
+            np.clip(
+                float(desired_agl_m) + float(agl_increment),
+                float(min_clearance_agl),
+                float(max_clearance_agl),
+            )
+        )
+        for heading_offset in config.v25_apas_heading_offsets_deg:
+            test_heading = float(wrap_angle(float(desired_heading_deg) + float(heading_offset)))
+            test_speed = float(desired_airspeed_mps)
+            while test_speed >= float(config.rl_speed_min) - 1e-9:
+                candidates.append(
+                    {
+                        "candidate_index": int(candidate_index),
+                        "heading_deg": float(test_heading),
+                        "airspeed_mps": float(test_speed),
+                        "agl_m": float(test_agl),
+                        "heading_offset_deg": float(heading_offset),
+                    }
+                )
+                candidate_index += 1
+                test_speed -= float(config.v25_apas_speed_decrement_mps)
+    return candidates

@@ -14,6 +14,7 @@ from v25.apas_safety import (
     build_apas_candidate_info,
     default_apas_info,
     empty_segment_probe,
+    generate_apas_candidates,
     probe_random_layer_segment,
     segment_probe_is_safe,
 )
@@ -703,51 +704,51 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         The first candidate is the RL command. Later candidates progressively
         turn aside, slow down, and request more clearance.
         """
-        candidate_index = 0
         segment_rejections = 0
         endpoint_rejections = 0
         least_bad: tuple[tuple[float, float, float, int], Optional[dict], dict] | None = None
-        for agl_increment in self.config.v25_apas_agl_increments_m:
-            test_agl = float(
-                np.clip(
-                    desired_agl_m + agl_increment,
-                    self.min_clearance_agl,
-                    self.max_clearance_agl,
-                )
+        candidates = generate_apas_candidates(
+            desired_heading_deg=desired_heading_deg,
+            desired_airspeed_mps=desired_airspeed_mps,
+            desired_agl_m=desired_agl_m,
+            min_clearance_agl=self.min_clearance_agl,
+            max_clearance_agl=self.max_clearance_agl,
+            config=self.config,
+            wrap_angle=self._wrap_angle_deg,
+        )
+        for candidate in candidates:
+            candidate_index = int(candidate["candidate_index"])
+            test_heading = float(candidate["heading_deg"])
+            test_speed = float(candidate["airspeed_mps"])
+            test_agl = float(candidate["agl_m"])
+            heading_offset = float(candidate["heading_offset_deg"])
+            transition = self._simulate_true_transition(test_heading, test_speed, test_agl)
+            segment_safe, segment_probe = self._transition_segment_is_safe_for_apas(transition)
+            endpoint_safe = self._transition_is_safe_for_apas(transition)
+            if not segment_safe:
+                segment_rejections += 1
+            if not endpoint_safe:
+                endpoint_rejections += 1
+
+            candidate_score = apas_candidate_score(segment_probe, transition, candidate_index)
+            candidate_info = build_apas_candidate_info(
+                candidate_index=candidate_index,
+                heading_offset_deg=heading_offset,
+                desired_airspeed_mps=desired_airspeed_mps,
+                test_speed_mps=test_speed,
+                desired_agl_m=desired_agl_m,
+                test_agl_m=test_agl,
+                segment_rejections=segment_rejections,
+                endpoint_rejections=endpoint_rejections,
+                segment_probe=segment_probe,
             )
-            for heading_offset in self.config.v25_apas_heading_offsets_deg:
-                test_heading = self._wrap_angle_deg(desired_heading_deg + heading_offset)
-                test_speed = float(desired_airspeed_mps)
-                while test_speed >= self.config.rl_speed_min - 1e-9:
-                    transition = self._simulate_true_transition(test_heading, test_speed, test_agl)
-                    segment_safe, segment_probe = self._transition_segment_is_safe_for_apas(transition)
-                    endpoint_safe = self._transition_is_safe_for_apas(transition)
-                    if not segment_safe:
-                        segment_rejections += 1
-                    if not endpoint_safe:
-                        endpoint_rejections += 1
+            if least_bad is None or candidate_score < least_bad[0]:
+                least_bad = (candidate_score, transition, candidate_info)
 
-                    candidate_score = apas_candidate_score(segment_probe, transition, candidate_index)
-                    candidate_info = build_apas_candidate_info(
-                        candidate_index=candidate_index,
-                        heading_offset_deg=float(heading_offset),
-                        desired_airspeed_mps=desired_airspeed_mps,
-                        test_speed_mps=test_speed,
-                        desired_agl_m=desired_agl_m,
-                        test_agl_m=test_agl,
-                        segment_rejections=segment_rejections,
-                        endpoint_rejections=endpoint_rejections,
-                        segment_probe=segment_probe,
-                    )
-                    if least_bad is None or candidate_score < least_bad[0]:
-                        least_bad = (candidate_score, transition, candidate_info)
-
-                    if segment_safe and endpoint_safe:
-                        return transition, {
-                            **candidate_info,
-                        }
-                    candidate_index += 1
-                    test_speed -= self.config.v25_apas_speed_decrement_mps
+            if segment_safe and endpoint_safe:
+                return transition, {
+                    **candidate_info,
+                }
 
         if least_bad is not None:
             _, fallback_transition, fallback_info = least_bad
@@ -760,7 +761,7 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
             }
             return fallback_transition, fallback_info
 
-        info = default_apas_info(candidate_index=candidate_index, intervened=True)
+        info = default_apas_info(candidate_index=len(candidates), intervened=True)
         info.update(
             apas_segment_rejections=int(segment_rejections),
             apas_endpoint_rejections=int(endpoint_rejections),
