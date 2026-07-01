@@ -385,13 +385,25 @@ refactor: extract metrics recorder
 
 ## 7. 当前推荐下一步
 
-现在应执行 Phase 1：
+Phase 1 已完成，并且 Phase 2 的 v2.5 核心边界已经完成到可支撑 v3.0 地图任务的程度：
 
 ```text
-1. 固化重构文档；
-2. 固化最终验证脚本；
-3. 更新 README 指向稳定入口；
-4. 然后再开 Phase 2 拆分核心模块。
+1. 固化重构文档与最终验证脚本；
+2. 抽出 waypoint-skip / do-no-harm / evaluation costs；
+3. 抽出 episode metrics reset；
+4. 抽出 local hazard history 与 risk membrane；
+5. 抽出 APAS segment probe / candidate / scoring helper；
+6. 抽出 Expert candidate / selection / rollout scoring；
+7. 抽出 local risk observer / sensor feature helpers。
 ```
 
-这一步完成后，项目会从“能跑但入口多”变成“有地图、有边界、有稳定验证入口”。
+因此，v3.0 前不建议继续为了“干净”而深拆 `GuidedDroneEnvV25`。剩余大块包括 true-world step 主循环、rejoin/replan、reward 结算和 Gym 接口，它们彼此耦合较强，继续拆容易在没有新业务收益时引入回归。
+
+当前停止线：
+
+```text
+先进入 v3.0 地图任务执行层：
+地图标定 / 巡检点 / 任务权重 / 时间约束 / 充电点 / 避难点 / 多任务执行。
+```
+
+如果 v3.0 实现过程中发现某个边界反复阻碍开发，再做针对性重构。不要先把重构本身变成新项目。

@@ -124,21 +124,33 @@ aerorisk/execution/dynamics.py
 ### V2.5 执行环境
 
 - `v25/rl_env_disruptive.py`
+- `v25/control_helpers.py`
+- `v25/episode_metrics.py`
+- `v25/local_hazard.py`
+- `v25/risk_membrane.py`
+- `v25/sensors.py`
+- `v25/apas_safety.py`
+- `v25/expert_policy.py`
 
-这是当前最需要拆分的文件。它承担了太多职责：
+`v25/rl_env_disruptive.py` 仍然是 Gym 环境和真实执行主循环，但 v3.0 前已经抽出了下列稳定边界：
 
-- Gym 环境接口
-- 任务初始化
-- A* 路径跟踪
-- 随机层观测
-- Expert 决策
-- APAS 安全过滤
-- waypoint-skip
-- do-no-harm gate
-- reward
-- episode 统计
+- `control_helpers.py`: waypoint-skip、do-no-harm gate、评估代价。
+- `episode_metrics.py`: episode 级计数器与运行时 tracker 初始化。
+- `local_hazard.py`: 局部风险历史、趋势预警。
+- `risk_membrane.py`: 稀疏观测到连续风险膜、风险带绕行建议。
+- `sensors.py`: local risk observer / circle oracle / sector radar 观测特征。
+- `apas_safety.py`: APAS 候选动作、segment probe、硬安全检查相关 helper。
+- `expert_policy.py`: Expert 候选动作、动作选择、rollout scoring。
 
-重构时优先拆它，但不能一步搬空。建议先抽纯函数/小类，并保持旧类 API 不变。
+`rl_env_disruptive.py` 保留的职责是：
+
+- Gym 环境接口；
+- reset / step 主流程；
+- A* 参考指令和真实世界执行；
+- 各 helper 模块之间的状态编排；
+- reward、终止条件、日志字段汇总。
+
+这一状态足够支撑 v3.0 地图任务层。后续不建议在没有明确业务痛点时继续搬空环境类。
 
 目标归属：
 
@@ -228,4 +240,3 @@ experiments/
 - 方法命名不混乱。
 - 结果文件仍写入 `results/`。
 - 不在同一个提交里同时大改结构和大改参数。
-
