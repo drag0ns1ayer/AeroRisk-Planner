@@ -128,6 +128,9 @@ def _run_variant(initial_env: GuidedDroneEnvV25, variant: dict) -> Dict[str, flo
         "episode_expert_emergency_steps": int(getattr(env, "episode_expert_emergency_steps", 0)),
         "episode_expert_recovering_steps": int(getattr(env, "episode_expert_recovering_steps", 0)),
         "episode_destructive_core_hits": int(getattr(env, "episode_destructive_core_hits", 0)),
+        "episode_do_no_harm_events": int(getattr(env, "episode_do_no_harm_events", 0)),
+        "episode_do_no_harm_suppressed_steps": int(getattr(env, "episode_do_no_harm_suppressed_steps", 0)),
+        "episode_do_no_harm_cooldown_steps": int(getattr(env, "episode_do_no_harm_cooldown_steps", 0)),
     }
 
 
@@ -159,6 +162,9 @@ def summarize_ablation_rows(rows: List[Dict[str, object]], method: str) -> Dict[
         "destructive_core_hits_mean": _mean(sub, "episode_destructive_core_hits"),
         "expert_band_avoidance_steps_mean": _mean(sub, "episode_expert_band_avoidance_steps"),
         "expert_emergency_steps_mean": _mean(sub, "episode_expert_emergency_steps"),
+        "do_no_harm_events_mean": _mean(sub, "episode_do_no_harm_events"),
+        "do_no_harm_suppressed_steps_mean": _mean(sub, "episode_do_no_harm_suppressed_steps"),
+        "do_no_harm_cooldown_steps_mean": _mean(sub, "episode_do_no_harm_cooldown_steps"),
         "terminated_reasons": reasons,
     }
 

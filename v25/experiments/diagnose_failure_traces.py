@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 import numpy as np
+from stable_baselines3 import PPO
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -48,16 +49,31 @@ def _make_env(config: SimulationConfig, seed: int, start_xy, goal_xy, enable_apa
     return env
 
 
-def _method_settings(method: str) -> tuple[bool, bool]:
+def _method_settings(method: str) -> tuple[str, bool]:
     if method == "astar":
-        return False, False
+        return "astar", False
     if method == "astar_apas":
-        return False, True
+        return "astar", True
     if method == "expert":
-        return True, False
+        return "expert", False
     if method == "expert_apas":
-        return True, True
+        return "expert", True
+    if method == "rl":
+        return "rl", False
+    if method == "rl_apas":
+        return "rl", True
     raise ValueError(f"Unsupported method: {method}")
+
+
+def _load_ppo_model(model_path: str | None):
+    if not model_path:
+        return None
+    path = Path(model_path)
+    if path.suffix == ".zip":
+        load_path = str(path)[:-4]
+    else:
+        load_path = str(path)
+    return PPO.load(load_path, device="cpu")
 
 
 def _safe_float(value, default: float = 0.0) -> float:
@@ -80,12 +96,16 @@ def _run_method(
     method: str,
     last_steps: int,
     sampling_trials: int,
+    rl_model=None,
 ) -> tuple[list[dict], dict]:
     task_cfg = copy.deepcopy(config)
     task_cfg.wind_seed = int(seed)
     task = sample_task_for_seed(task_cfg, seed=int(seed), max_trials=int(sampling_trials))
-    use_expert, enable_apas = _method_settings(method)
+    controller, enable_apas = _method_settings(method)
+    if controller == "rl" and rl_model is None:
+        raise ValueError(f"Method {method} requires --rl-model-path.")
     env = _make_env(config, seed, task.start_xy, task.goal_xy, enable_apas=enable_apas)
+    obs, _ = env._get_obs(), {}
 
     trace_buffer: deque[dict] = deque(maxlen=int(last_steps))
     terminated = False
@@ -105,15 +125,18 @@ def _run_method(
         pre_time = float(env.current_time)
         pre_pos = np.asarray(env.current_pos, dtype=float).copy()
 
-        if use_expert:
+        if controller == "expert":
             action = env.local_avoidance_expert_action()
             proposed_mode = str(getattr(env, "last_expert_mode", "unknown"))
+        elif controller == "rl":
+            action, _ = rl_model.predict(obs, deterministic=True)
+            action = np.asarray(action, dtype=np.float32)
+            proposed_mode = "rl_policy"
         else:
             action = np.zeros(3, dtype=np.float32)
             proposed_mode = "inactive"
 
         obs, _, terminated, truncated, final_info = env.step(action)
-        del obs
 
         curr_pos = np.asarray(env.current_pos, dtype=float)
         step_distance = float(np.linalg.norm(curr_pos - prev_pos))
@@ -158,6 +181,7 @@ def _run_method(
                 "action_agl": float(action[2]),
                 "proposed_expert_mode": proposed_mode,
                 "executed_expert_mode": str(final_info.get("expert_mode", proposed_mode)),
+                "controller_mode": proposed_mode,
                 "p_crash": _safe_float(final_info.get("p_crash", 0.0)),
                 "power_w": _safe_float(final_info.get("power_w", 0.0)),
                 "airspeed_mps": _safe_float(final_info.get("airspeed_mps", 0.0)),
@@ -168,6 +192,24 @@ def _run_method(
                 "commanded_heading_deg": _safe_float(final_info.get("commanded_heading_deg", 0.0)),
                 "commanded_airspeed_mps": _safe_float(final_info.get("commanded_airspeed_mps", 0.0)),
                 "commanded_agl_m": _safe_float(final_info.get("commanded_agl_m", 0.0)),
+                "do_no_harm_active": bool(final_info.get("do_no_harm_active", False)),
+                "do_no_harm_reason": str(final_info.get("do_no_harm_reason", "none")),
+                "do_no_harm_recent_progress_sum": _safe_float(
+                    final_info.get("do_no_harm_recent_progress_sum", 0.0)
+                ),
+                "do_no_harm_recent_risk_delta": _safe_float(final_info.get("do_no_harm_recent_risk_delta", 0.0)),
+                "do_no_harm_recent_apas_interventions": int(
+                    final_info.get("do_no_harm_recent_apas_interventions", 0)
+                ),
+                "do_no_harm_recent_segment_rejections": int(
+                    final_info.get("do_no_harm_recent_segment_rejections", 0)
+                ),
+                "do_no_harm_recent_no_valid_candidates": int(
+                    final_info.get("do_no_harm_recent_no_valid_candidates", 0)
+                ),
+                "do_no_harm_cooldown_steps_remaining": int(
+                    final_info.get("do_no_harm_cooldown_steps_remaining", 0)
+                ),
                 "local_hazard_need": _safe_float(final_info.get("local_hazard_need", 0.0)),
                 "local_hazard_max_danger": _safe_float(final_info.get("local_hazard_max_danger", 0.0)),
                 "local_hazard_forward_danger": _safe_float(final_info.get("local_hazard_forward_danger", 0.0)),
@@ -247,6 +289,9 @@ def _run_method(
         "eval_adjusted_energy_j": float(getattr(env, "episode_eval_adjusted_energy_j", 0.0)),
         "expert_band_avoidance_steps": int(getattr(env, "episode_expert_band_avoidance_steps", 0)),
         "expert_pre_emergency_slow_steps": int(getattr(env, "episode_expert_pre_emergency_slow_steps", 0)),
+        "do_no_harm_events": int(getattr(env, "episode_do_no_harm_events", 0)),
+        "do_no_harm_suppressed_steps": int(getattr(env, "episode_do_no_harm_suppressed_steps", 0)),
+        "do_no_harm_cooldown_steps": int(getattr(env, "episode_do_no_harm_cooldown_steps", 0)),
         "trace_included": not success,
     }
     return trace_rows, summary
@@ -280,6 +325,15 @@ def _summarize(summaries: list[dict]) -> dict:
                 float(row.get("expert_pre_emergency_slow_steps", 0.0)) for row in rows
             )
             / n,
+            "do_no_harm_events_mean": sum(float(row.get("do_no_harm_events", 0.0)) for row in rows) / n,
+            "do_no_harm_suppressed_steps_mean": sum(
+                float(row.get("do_no_harm_suppressed_steps", 0.0)) for row in rows
+            )
+            / n,
+            "do_no_harm_cooldown_steps_mean": sum(
+                float(row.get("do_no_harm_cooldown_steps", 0.0)) for row in rows
+            )
+            / n,
             "replans_mean": sum(float(row.get("replans", 0.0)) for row in rows) / n,
             "eval_adjusted_energy_j_mean": sum(float(row.get("eval_adjusted_energy_j", 0.0)) for row in rows) / n,
         }
@@ -294,8 +348,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--methods",
         nargs="+",
-        choices=("astar", "expert", "astar_apas", "expert_apas"),
+        choices=("astar", "expert", "rl", "astar_apas", "expert_apas", "rl_apas"),
         default=["astar_apas", "expert_apas"],
+    )
+    parser.add_argument(
+        "--rl-model-path",
+        default=None,
+        help="PPO model path used by rl/rl_apas methods, with or without .zip suffix.",
     )
     parser.add_argument("--curriculum-stage", type=int, default=3)
     parser.add_argument("--stress", choices=("normal", "hard", "extreme", "fragile"), default="fragile")
@@ -321,6 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     seeds = _parse_seeds(args.seeds) if args.seeds else [int(args.seed + idx) for idx in range(int(args.episodes))]
+    rl_model = _load_ppo_model(args.rl_model_path) if any(str(m).startswith("rl") for m in args.methods) else None
 
     config = SimulationConfig()
     config.curriculum_stage = int(args.curriculum_stage)
@@ -344,6 +404,7 @@ def main() -> int:
                 method=str(method),
                 last_steps=int(args.last_steps),
                 sampling_trials=int(args.task_sampling_trials),
+                rl_model=rl_model,
             )
             summaries.append(summary)
             all_traces.extend(trace_rows)

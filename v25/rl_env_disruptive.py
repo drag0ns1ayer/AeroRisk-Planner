@@ -89,6 +89,13 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         self.last_expert_active = False
         self._suppress_waypoint_skip_metrics = False
         self.local_hazard_history = deque(maxlen=int(max(1, self.config.v25_local_hazard_history_steps)))
+        self.do_no_harm_history = deque(maxlen=int(max(1, self.config.v25_do_no_harm_window_steps)))
+        self.do_no_harm_cooldown_steps_remaining = 0
+        self.last_do_no_harm_active = False
+        self.last_do_no_harm_reason = "none"
+        self.episode_do_no_harm_events = 0
+        self.episode_do_no_harm_suppressed_steps = 0
+        self.episode_do_no_harm_cooldown_steps = 0
 
         self.episode_disturbance_max = 0.0
         self.episode_disturbance_sum = 0.0
@@ -185,6 +192,13 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         self.last_expert_active = False
         self._suppress_waypoint_skip_metrics = False
         self.local_hazard_history = deque(maxlen=int(max(1, self.config.v25_local_hazard_history_steps)))
+        self.do_no_harm_history = deque(maxlen=int(max(1, self.config.v25_do_no_harm_window_steps)))
+        self.do_no_harm_cooldown_steps_remaining = 0
+        self.last_do_no_harm_active = False
+        self.last_do_no_harm_reason = "none"
+        self.episode_do_no_harm_events = 0
+        self.episode_do_no_harm_suppressed_steps = 0
+        self.episode_do_no_harm_cooldown_steps = 0
         self.episode_disturbance_max = 0.0
         self.episode_disturbance_sum = 0.0
         self.episode_disturbance_steps = 0
@@ -1542,6 +1556,105 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
             "final_goal_dist": float(final_goal_dist),
         }
 
+    def _apply_do_no_harm_gate(self, raw_action: np.ndarray, local_hazard: dict[str, float]) -> tuple[np.ndarray, dict[str, Any]]:
+        """
+        Suppress harmful upper-layer residuals using only already-observed history.
+
+        APAS rejects immediately unsafe motions. This gate is different: it
+        detects an upper-layer residual that has recently failed to make mission
+        progress while risk is not improving and APAS is already working hard.
+        """
+        action = np.asarray(raw_action, dtype=float).copy()
+        info: dict[str, Any] = {
+            "do_no_harm_active": False,
+            "do_no_harm_reason": "none",
+            "do_no_harm_recent_progress_sum": 0.0,
+            "do_no_harm_recent_risk_delta": 0.0,
+            "do_no_harm_recent_apas_interventions": 0,
+            "do_no_harm_recent_segment_rejections": 0,
+            "do_no_harm_recent_no_valid_candidates": 0,
+        }
+        if not bool(getattr(self.config, "v25_do_no_harm_gate_enabled", True)):
+            self.last_do_no_harm_active = False
+            self.last_do_no_harm_reason = "disabled"
+            info["do_no_harm_reason"] = "disabled"
+            return action, info
+
+        upper_layer_active = float(np.linalg.norm(action)) >= float(self.config.v25_do_no_harm_min_raw_action_norm)
+        if self.do_no_harm_cooldown_steps_remaining > 0:
+            self.do_no_harm_cooldown_steps_remaining -= 1
+            if upper_layer_active:
+                self.last_do_no_harm_active = True
+                self.last_do_no_harm_reason = "cooldown"
+                self.episode_do_no_harm_suppressed_steps += 1
+                self.episode_do_no_harm_cooldown_steps += 1
+                info.update(do_no_harm_active=True, do_no_harm_reason="cooldown")
+                return np.zeros_like(action), info
+            self.last_do_no_harm_active = False
+            self.last_do_no_harm_reason = "cooldown_idle"
+            info["do_no_harm_reason"] = "cooldown_idle"
+            return action, info
+
+        window = int(max(1, self.config.v25_do_no_harm_window_steps))
+        if not upper_layer_active or len(self.do_no_harm_history) < window:
+            self.last_do_no_harm_active = False
+            self.last_do_no_harm_reason = "inactive" if not upper_layer_active else "insufficient_history"
+            info["do_no_harm_reason"] = self.last_do_no_harm_reason
+            return action, info
+
+        recent = list(self.do_no_harm_history)[-window:]
+        progress_sum = float(sum(float(item["progress_m"]) for item in recent))
+        risk_delta = float(float(recent[-1]["p_crash"]) - float(recent[0]["p_crash"]))
+        apas_interventions = int(sum(int(item["apas_intervened"]) for item in recent))
+        segment_rejections = int(sum(int(item["apas_segment_rejections"]) for item in recent))
+        no_valid_candidates = int(sum(int(item["apas_no_valid_candidate"]) for item in recent))
+        info.update(
+            do_no_harm_recent_progress_sum=progress_sum,
+            do_no_harm_recent_risk_delta=risk_delta,
+            do_no_harm_recent_apas_interventions=apas_interventions,
+            do_no_harm_recent_segment_rejections=segment_rejections,
+            do_no_harm_recent_no_valid_candidates=no_valid_candidates,
+        )
+
+        bad_progress = progress_sum <= float(self.config.v25_do_no_harm_min_progress_sum_m)
+        risk_not_improving = risk_delta >= -float(self.config.v25_do_no_harm_risk_drop_eps)
+        apas_struggling = (
+            apas_interventions >= int(self.config.v25_do_no_harm_min_apas_interventions)
+            or segment_rejections >= int(self.config.v25_do_no_harm_min_segment_rejections)
+            or no_valid_candidates >= int(self.config.v25_do_no_harm_min_no_valid_candidates)
+        )
+        slow_into_risk_wall = (
+            risk_not_improving
+            and progress_sum <= float(self.config.v25_do_no_harm_slow_trap_max_progress_sum_m)
+            and float(action[1]) <= float(self.config.v25_do_no_harm_slow_trap_speed_action)
+            and (
+                float(local_hazard.get("risk_membrane_no_escape_gap", 0.0)) >= 0.5
+                or float(local_hazard.get("risk_membrane_wall_ahead", 0.0)) >= 0.5
+                or float(local_hazard.get("forward_danger", 0.0)) >= float(self.config.v25_expert_hard_risk_threshold)
+            )
+        )
+        if bad_progress and risk_not_improving and apas_struggling:
+            self.do_no_harm_cooldown_steps_remaining = int(self.config.v25_do_no_harm_cooldown_steps)
+            self.episode_do_no_harm_events += 1
+            self.episode_do_no_harm_suppressed_steps += 1
+            self.last_do_no_harm_active = True
+            self.last_do_no_harm_reason = "bad_progress_risk_not_improving"
+            info.update(do_no_harm_active=True, do_no_harm_reason="bad_progress_risk_not_improving")
+            return np.zeros_like(action), info
+        if slow_into_risk_wall:
+            self.do_no_harm_cooldown_steps_remaining = int(self.config.v25_do_no_harm_cooldown_steps)
+            self.episode_do_no_harm_events += 1
+            self.episode_do_no_harm_suppressed_steps += 1
+            self.last_do_no_harm_active = True
+            self.last_do_no_harm_reason = "slow_into_risk_wall"
+            info.update(do_no_harm_active=True, do_no_harm_reason="slow_into_risk_wall")
+            return np.zeros_like(action), info
+
+        self.last_do_no_harm_active = False
+        self.last_do_no_harm_reason = "clear"
+        info["do_no_harm_reason"] = "clear"
+        return action, info
+
     def step(self, action: np.ndarray):
         self.current_step += 1
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
@@ -1559,6 +1672,7 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         )
         residual_gate = compute_residual_gate(intervention_need, self.config)
         raw_action = action.copy()
+        action, do_no_harm_info = self._apply_do_no_harm_gate(raw_action, local_hazard)
         action = action * residual_gate
         residual_control_cost, residual_magnitude, action_delta = compute_residual_control_cost(
             action,
@@ -1748,6 +1862,15 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         self.episode_local_hazard_trend_need_sum += float(local_hazard.get("trend_need", 0.0))
         self.episode_local_hazard_forward_delta_sum += float(local_hazard.get("delta_forward_danger", 0.0))
         self.episode_local_hazard_positive_trend_steps += int(float(local_hazard.get("trend_need", 0.0)) > 1e-6)
+        self.do_no_harm_history.append(
+            {
+                "progress_m": float(progress),
+                "p_crash": float(p_crash),
+                "apas_intervened": int(bool(apas_info.get("apas_intervened", False))),
+                "apas_segment_rejections": int(apas_info.get("apas_segment_rejections", 0)),
+                "apas_no_valid_candidate": int(bool(apas_info.get("apas_no_valid_candidate", False))),
+            }
+        )
         expert_mode_this_step = self.last_expert_mode if self.last_expert_active else "inactive"
         self.episode_expert_normal_steps += int(expert_mode_this_step == "normal")
         self.episode_expert_cautious_steps += int(expert_mode_this_step == "cautious")
@@ -1867,6 +1990,22 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
                 "residual_speed_action": float(action[1]),
                 "residual_agl_action": float(action[2]),
                 "residual_action_delta": action_delta,
+                "do_no_harm_active": bool(do_no_harm_info.get("do_no_harm_active", False)),
+                "do_no_harm_reason": str(do_no_harm_info.get("do_no_harm_reason", "none")),
+                "do_no_harm_recent_progress_sum": float(
+                    do_no_harm_info.get("do_no_harm_recent_progress_sum", 0.0)
+                ),
+                "do_no_harm_recent_risk_delta": float(do_no_harm_info.get("do_no_harm_recent_risk_delta", 0.0)),
+                "do_no_harm_recent_apas_interventions": int(
+                    do_no_harm_info.get("do_no_harm_recent_apas_interventions", 0)
+                ),
+                "do_no_harm_recent_segment_rejections": int(
+                    do_no_harm_info.get("do_no_harm_recent_segment_rejections", 0)
+                ),
+                "do_no_harm_recent_no_valid_candidates": int(
+                    do_no_harm_info.get("do_no_harm_recent_no_valid_candidates", 0)
+                ),
+                "do_no_harm_cooldown_steps_remaining": int(self.do_no_harm_cooldown_steps_remaining),
                 "residual_control_cost": residual_control_cost,
                 "unproductive_residual_cost": float(unproductive_residual_cost),
                 "forward_progress_reward": float(forward_progress_reward),
@@ -1948,6 +2087,9 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
                 "episode_expert_rejoin_actions": self.episode_expert_rejoin_actions,
                 "episode_expert_rejoin_attempts": self.episode_expert_rejoin_attempts,
                 "episode_expert_rejoin_rejected": self.episode_expert_rejoin_rejected,
+                "episode_do_no_harm_events": self.episode_do_no_harm_events,
+                "episode_do_no_harm_suppressed_steps": self.episode_do_no_harm_suppressed_steps,
+                "episode_do_no_harm_cooldown_steps": self.episode_do_no_harm_cooldown_steps,
                 "replan_triggered": bool(replan_reason != "none"),
                 "replan_success": bool(replan_success),
                 "replan_reason": str(replan_reason),

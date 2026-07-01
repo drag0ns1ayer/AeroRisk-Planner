@@ -311,6 +311,9 @@ def evaluate_model(model_path: str, config: SimulationConfig, n_episodes: int, e
                 "episode_residual_gate_mean": (
                     getattr(env, "episode_residual_gate_sum", 0.0) / max(episode_length, 1)
                 ),
+                "episode_do_no_harm_events": getattr(env, "episode_do_no_harm_events", 0),
+                "episode_do_no_harm_suppressed_steps": getattr(env, "episode_do_no_harm_suppressed_steps", 0),
+                "episode_do_no_harm_cooldown_steps": getattr(env, "episode_do_no_harm_cooldown_steps", 0),
                 "episode_local_hazard_need_mean": (
                     getattr(env, "episode_local_hazard_need_sum", 0.0) / max(episode_length, 1)
                 ),
@@ -361,6 +364,15 @@ def evaluate_model(model_path: str, config: SimulationConfig, n_episodes: int, e
         ),
         "episode_residual_gate_mean": (
             float(raw_df["episode_residual_gate_mean"].mean()) if not raw_df.empty else 0.0
+        ),
+        "episode_do_no_harm_events_mean": (
+            float(raw_df["episode_do_no_harm_events"].mean()) if not raw_df.empty else 0.0
+        ),
+        "episode_do_no_harm_suppressed_steps_mean": (
+            float(raw_df["episode_do_no_harm_suppressed_steps"].mean()) if not raw_df.empty else 0.0
+        ),
+        "episode_do_no_harm_cooldown_steps_mean": (
+            float(raw_df["episode_do_no_harm_cooldown_steps"].mean()) if not raw_df.empty else 0.0
         ),
         "episode_local_hazard_need_mean": (
             float(raw_df["episode_local_hazard_need_mean"].mean()) if not raw_df.empty else 0.0
@@ -434,6 +446,8 @@ def train_ppo(
             model.lr_schedule = get_schedule_fn(new_lr)
             for param_group in model.policy.optimizer.param_groups:
                 param_group["lr"] = new_lr
+            if importlib.util.find_spec("tensorboard") is None:
+                model.tensorboard_log = None
         except Exception as exc:
             raise ValueError(
                 "Unable to continue from the requested model. Upgraded v2.5 models must be retrained "

@@ -251,6 +251,9 @@ def _evaluate_in_shared_true_world(
         "episode_replan_path_drift_triggers": int(getattr(env, "episode_replan_path_drift_triggers", 0)),
         "episode_replan_low_progress_triggers": int(getattr(env, "episode_replan_low_progress_triggers", 0)),
         "episode_replan_no_valid_triggers": int(getattr(env, "episode_replan_no_valid_triggers", 0)),
+        "episode_do_no_harm_events": int(getattr(env, "episode_do_no_harm_events", 0)),
+        "episode_do_no_harm_suppressed_steps": int(getattr(env, "episode_do_no_harm_suppressed_steps", 0)),
+        "episode_do_no_harm_cooldown_steps": int(getattr(env, "episode_do_no_harm_cooldown_steps", 0)),
     }
 
 
@@ -430,6 +433,15 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
     episode_replan_no_valid_triggers_mean = (
         float(np.mean([float(r.get("episode_replan_no_valid_triggers", 0.0)) for r in sub])) if sub else 0.0
     )
+    episode_do_no_harm_events_mean = (
+        float(np.mean([float(r.get("episode_do_no_harm_events", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_do_no_harm_suppressed_steps_mean = (
+        float(np.mean([float(r.get("episode_do_no_harm_suppressed_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
+    episode_do_no_harm_cooldown_steps_mean = (
+        float(np.mean([float(r.get("episode_do_no_harm_cooldown_steps", 0.0)) for r in sub])) if sub else 0.0
+    )
     return {
         "episodes": len(sub),
         "success_rate": success_rate,
@@ -497,6 +509,9 @@ def summarize_rows(rows: List[Dict[str, object]], method: str) -> Dict[str, floa
         "episode_replan_path_drift_triggers_mean": episode_replan_path_drift_triggers_mean,
         "episode_replan_low_progress_triggers_mean": episode_replan_low_progress_triggers_mean,
         "episode_replan_no_valid_triggers_mean": episode_replan_no_valid_triggers_mean,
+        "episode_do_no_harm_events_mean": episode_do_no_harm_events_mean,
+        "episode_do_no_harm_suppressed_steps_mean": episode_do_no_harm_suppressed_steps_mean,
+        "episode_do_no_harm_cooldown_steps_mean": episode_do_no_harm_cooldown_steps_mean,
     }
 
 

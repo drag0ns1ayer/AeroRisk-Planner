@@ -396,6 +396,17 @@ class SimulationConfig:
     v25_replan_no_valid_low_progress_steps: int = 10
     v25_replan_rejoin_lookahead_wps: int = 8
     v25_replan_min_path_points: int = 2
+    v25_do_no_harm_gate_enabled: bool = True
+    v25_do_no_harm_window_steps: int = 4
+    v25_do_no_harm_cooldown_steps: int = 8
+    v25_do_no_harm_min_raw_action_norm: float = 0.08
+    v25_do_no_harm_min_progress_sum_m: float = 0.0
+    v25_do_no_harm_risk_drop_eps: float = 0.005
+    v25_do_no_harm_min_apas_interventions: int = 1
+    v25_do_no_harm_min_segment_rejections: int = 8
+    v25_do_no_harm_min_no_valid_candidates: int = 1
+    v25_do_no_harm_slow_trap_max_progress_sum_m: float = 80.0
+    v25_do_no_harm_slow_trap_speed_action: float = -0.35
     # v2.5 disruptive-reward tuning: bias RL toward low energy and low time while keeping risk control.
     v25_reward_power_saving_gain: float = 0.00014
     v25_reward_risk_gain: float = 0.65
@@ -750,6 +761,24 @@ class SimulationConfig:
             raise ValueError("v25_replan_rejoin_lookahead_wps must be >= 1")
         if self.v25_replan_min_path_points < 2:
             raise ValueError("v25_replan_min_path_points must be >= 2")
+        if self.v25_do_no_harm_window_steps < 1:
+            raise ValueError("v25_do_no_harm_window_steps must be >= 1")
+        if self.v25_do_no_harm_cooldown_steps < 0:
+            raise ValueError("v25_do_no_harm_cooldown_steps must be >= 0")
+        if self.v25_do_no_harm_min_raw_action_norm < 0:
+            raise ValueError("v25_do_no_harm_min_raw_action_norm must be >= 0")
+        if self.v25_do_no_harm_risk_drop_eps < 0:
+            raise ValueError("v25_do_no_harm_risk_drop_eps must be >= 0")
+        if self.v25_do_no_harm_slow_trap_max_progress_sum_m < 0:
+            raise ValueError("v25_do_no_harm_slow_trap_max_progress_sum_m must be >= 0")
+        if not (-1.0 <= self.v25_do_no_harm_slow_trap_speed_action <= 1.0):
+            raise ValueError("v25_do_no_harm_slow_trap_speed_action must be in [-1, 1]")
+        if min(
+            self.v25_do_no_harm_min_apas_interventions,
+            self.v25_do_no_harm_min_segment_rejections,
+            self.v25_do_no_harm_min_no_valid_candidates,
+        ) < 0:
+            raise ValueError("v25 do-no-harm APAS trigger counts must be >= 0")
         if min(
             self.v25_expert_risk_gain,
             self.v25_expert_core_penalty,
