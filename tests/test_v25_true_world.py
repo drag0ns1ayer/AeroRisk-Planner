@@ -6,7 +6,7 @@ from configs.config import SimulationConfig
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
-from v25.risk_membrane import compute_risk_membrane_summary
+from v25.risk_membrane import compute_risk_membrane_summary, risk_membrane_action
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
     compute_intervention_need,
@@ -939,6 +939,20 @@ class V25TrueWorldTests(unittest.TestCase):
 
         self.assertEqual(mode, "band_avoidance")
         self.assertGreater(action[0], 0.0)
+        self.assertLess(action[1], 0.0)
+
+    def test_risk_membrane_action_helper_slows_when_no_escape_gap(self):
+        action, mode = risk_membrane_action(
+            {
+                "risk_membrane_wall_ahead": 1.0,
+                "risk_membrane_no_escape_gap": 1.0,
+                "risk_membrane_best_gap_angle_deg": 0.0,
+            },
+            self.config,
+        )
+
+        self.assertEqual(mode, "pre_emergency_slow")
+        self.assertEqual(action[0], 0.0)
         self.assertLess(action[1], 0.0)
 
 

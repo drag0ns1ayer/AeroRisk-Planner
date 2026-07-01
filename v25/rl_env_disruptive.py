@@ -18,7 +18,7 @@ from v25.local_hazard import (
     local_hazard_history_features,
     local_hazard_memory_item,
 )
-from v25.risk_membrane import compute_risk_membrane_summary, empty_risk_membrane_summary
+from v25.risk_membrane import compute_risk_membrane_summary, empty_risk_membrane_summary, risk_membrane_action
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
 
@@ -852,30 +852,7 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         return np.clip(raw_action, -1.0, 1.0).astype(np.float32)
 
     def _risk_membrane_action(self, local_hazard: dict[str, float]) -> Optional[tuple[np.ndarray, str]]:
-        if float(local_hazard.get("risk_membrane_wall_ahead", 0.0)) <= 0.0:
-            return None
-
-        if float(local_hazard.get("risk_membrane_no_escape_gap", 0.0)) > 0.0:
-            return (
-                np.array([0.0, float(self.config.v25_expert_pre_emergency_speed_action), 0.0], dtype=float),
-                "pre_emergency_slow",
-            )
-
-        gap_angle = float(local_hazard.get("risk_membrane_best_gap_angle_deg", 0.0))
-        if abs(gap_angle) < 1e-6:
-            return None
-
-        heading_action = float(
-            np.clip(
-                gap_angle / max(float(self.config.rl_heading_delta_max_deg), 1e-6),
-                -float(self.config.v25_expert_band_avoid_heading_limit),
-                float(self.config.v25_expert_band_avoid_heading_limit),
-            )
-        )
-        return (
-            np.array([heading_action, float(self.config.v25_expert_band_avoid_speed_action), 0.0], dtype=float),
-            "band_avoidance",
-        )
+        return risk_membrane_action(local_hazard, self.config)
 
     def _nearest_path_index(self, pos_xy: np.ndarray) -> int:
         if not getattr(self, "global_astar_path", None):

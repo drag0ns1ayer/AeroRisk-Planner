@@ -118,3 +118,30 @@ def compute_risk_membrane_summary(
         "risk_membrane_best_gap_side": float(np.sign(best_gap_angle)),
         "risk_membrane_max_extended_risk": float(np.max(extended)) if extended.size else 0.0,
     }
+
+
+def risk_membrane_action(local_hazard: dict[str, float], config: SimulationConfig) -> tuple[np.ndarray, str] | None:
+    if float(local_hazard.get("risk_membrane_wall_ahead", 0.0)) <= 0.0:
+        return None
+
+    if float(local_hazard.get("risk_membrane_no_escape_gap", 0.0)) > 0.0:
+        return (
+            np.array([0.0, float(config.v25_expert_pre_emergency_speed_action), 0.0], dtype=float),
+            "pre_emergency_slow",
+        )
+
+    gap_angle = float(local_hazard.get("risk_membrane_best_gap_angle_deg", 0.0))
+    if abs(gap_angle) < 1e-6:
+        return None
+
+    heading_action = float(
+        np.clip(
+            gap_angle / max(float(config.rl_heading_delta_max_deg), 1e-6),
+            -float(config.v25_expert_band_avoid_heading_limit),
+            float(config.v25_expert_band_avoid_heading_limit),
+        )
+    )
+    return (
+        np.array([heading_action, float(config.v25_expert_band_avoid_speed_action), 0.0], dtype=float),
+        "band_avoidance",
+    )
