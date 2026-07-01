@@ -29,3 +29,41 @@ def expert_candidate_actions(
         for speed_action in speeds
         for agl_action in agls
     ]
+
+
+def select_expert_action_from_evaluations(
+    *,
+    zero_eval: dict,
+    normal_evaluations: list[dict],
+    emergency_evaluations: list[dict],
+    gradual_warning: bool,
+    config: SimulationConfig,
+) -> tuple[np.ndarray, str]:
+    zero_action = np.zeros(3, dtype=float)
+    candidate_mode = "cautious_trend" if gradual_warning else "avoiding"
+    improvement_threshold = (
+        float(config.v25_expert_trend_risk_improvement_threshold)
+        if gradual_warning
+        else float(config.v25_expert_risk_improvement_threshold)
+    )
+
+    safe_normal = [entry for entry in normal_evaluations if int(entry["hard_violation_count"]) == 0]
+    if safe_normal:
+        best = min(safe_normal, key=lambda entry: float(entry["score"]))
+        if int(zero_eval["hard_violation_count"]) == 0:
+            risk_improvement = float(zero_eval["max_risk"]) - float(best["max_risk"])
+            if risk_improvement < improvement_threshold:
+                return zero_action, "cautious_trend" if gradual_warning else "cautious"
+        return np.asarray(best["action"], dtype=float), candidate_mode
+
+    safe_emergency = [entry for entry in emergency_evaluations if int(entry["hard_violation_count"]) == 0]
+    pool = safe_emergency if safe_emergency else emergency_evaluations
+    best = min(
+        pool,
+        key=lambda entry: (
+            int(entry["hard_violation_count"]),
+            float(entry["max_risk"]),
+            float(entry["score"]),
+        ),
+    )
+    return np.asarray(best["action"], dtype=float), "emergency"

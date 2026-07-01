@@ -21,7 +21,7 @@ from v25.apas_safety import (
 from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
-from v25.expert_policy import expert_candidate_actions
+from v25.expert_policy import expert_candidate_actions, select_expert_action_from_evaluations
 from v25.local_hazard import (
     empty_local_hazard_summary,
     local_hazard_gradual_warning,
@@ -1064,40 +1064,21 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
     def _select_expert_action(self, gradual_warning: bool = False) -> tuple[np.ndarray, str]:
         zero_action = np.zeros(3, dtype=float)
         zero_eval = self._evaluate_expert_rollout(zero_action)
-        candidate_mode = "cautious_trend" if gradual_warning else "avoiding"
-        improvement_threshold = (
-            float(self.config.v25_expert_trend_risk_improvement_threshold)
-            if gradual_warning
-            else float(self.config.v25_expert_risk_improvement_threshold)
-        )
         normal_evaluations = [
             self._evaluate_expert_rollout(action)
             for action in self._expert_candidate_actions(emergency=False, mild=gradual_warning)
         ]
-        safe_normal = [entry for entry in normal_evaluations if int(entry["hard_violation_count"]) == 0]
-        if safe_normal:
-            best = min(safe_normal, key=lambda entry: float(entry["score"]))
-            if int(zero_eval["hard_violation_count"]) == 0:
-                risk_improvement = float(zero_eval["max_risk"]) - float(best["max_risk"])
-                if risk_improvement < improvement_threshold:
-                    return zero_action, "cautious_trend" if gradual_warning else "cautious"
-            return np.asarray(best["action"], dtype=float), candidate_mode
-
         emergency_evaluations = [
             self._evaluate_expert_rollout(action)
             for action in self._expert_candidate_actions(emergency=True)
         ]
-        safe_emergency = [entry for entry in emergency_evaluations if int(entry["hard_violation_count"]) == 0]
-        pool = safe_emergency if safe_emergency else emergency_evaluations
-        best = min(
-            pool,
-            key=lambda entry: (
-                int(entry["hard_violation_count"]),
-                float(entry["max_risk"]),
-                float(entry["score"]),
-            ),
+        return select_expert_action_from_evaluations(
+            zero_eval=zero_eval,
+            normal_evaluations=normal_evaluations,
+            emergency_evaluations=emergency_evaluations,
+            gradual_warning=gradual_warning,
+            config=self.config,
         )
-        return np.asarray(best["action"], dtype=float), "emergency"
 
     def _score_expert_rollout(self, first_action: np.ndarray) -> float:
         return float(self._evaluate_expert_rollout(first_action)["score"])

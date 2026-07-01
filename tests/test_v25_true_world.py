@@ -7,7 +7,7 @@ from v25.apas_safety import build_apas_candidate_info, generate_apas_candidates,
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
-from v25.expert_policy import expert_candidate_actions
+from v25.expert_policy import expert_candidate_actions, select_expert_action_from_evaluations
 from v25.risk_membrane import compute_risk_membrane_summary, risk_membrane_action
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
@@ -776,6 +776,38 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertGreater(len(emergency), 0)
         self.assertTrue(any(abs(float(action[0])) < 1.0 for action in mild))
         self.assertTrue(any(float(action[1]) < 0.0 for action in emergency))
+
+    def test_expert_selection_helper_falls_back_to_emergency_when_normal_unsafe(self):
+        emergency_action = np.array([1.0, -1.0, 0.0], dtype=float)
+        action, mode = select_expert_action_from_evaluations(
+            zero_eval={
+                "action": np.zeros(3, dtype=float),
+                "score": 0.0,
+                "hard_violation_count": 1,
+                "max_risk": 0.9,
+            },
+            normal_evaluations=[
+                {
+                    "action": np.array([0.5, 0.0, 0.0], dtype=float),
+                    "score": 1.0,
+                    "hard_violation_count": 1,
+                    "max_risk": 0.8,
+                }
+            ],
+            emergency_evaluations=[
+                {
+                    "action": emergency_action,
+                    "score": 5.0,
+                    "hard_violation_count": 0,
+                    "max_risk": 0.2,
+                }
+            ],
+            gradual_warning=False,
+            config=self.config,
+        )
+
+        self.assertEqual(mode, "emergency")
+        self.assertTrue(np.allclose(action, emergency_action))
 
     def test_apas_searches_for_a_safer_residual_command(self):
         env = object.__new__(GuidedDroneEnvV25)
