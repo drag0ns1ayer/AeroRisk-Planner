@@ -21,6 +21,44 @@ from v30.segment_executor import AStarSegmentExecutor
 from v30.task_executor import SimpleTaskExecutor
 
 
+def offset_mission_map(
+    mission_map: MissionMap,
+    origin_xy: tuple[float, float],
+    scale: float = 1.0,
+) -> MissionMap:
+    ox, oy = origin_xy
+    s = float(scale)
+    return MissionMap(
+        name=mission_map.name,
+        start_xy=(ox + s * mission_map.start_xy[0], oy + s * mission_map.start_xy[1]),
+        home_xy=None if mission_map.home_xy is None else (ox + s * mission_map.home_xy[0], oy + s * mission_map.home_xy[1]),
+        inspection_points=[
+            InspectionPoint(
+                id=point.id,
+                xy=(ox + s * point.xy[0], oy + s * point.xy[1]),
+                priority=point.priority,
+                service_time_s=point.service_time_s,
+                risk_value=point.risk_value,
+                altitude_agl_m=point.altitude_agl_m,
+                deadline_s=point.deadline_s,
+                status=point.status,
+            )
+            for point in mission_map.inspection_points
+        ],
+        charging_stations=[
+            ChargingStation(
+                id=station.id,
+                xy=(ox + s * station.xy[0], oy + s * station.xy[1]),
+                charge_rate_j_per_s=station.charge_rate_j_per_s,
+                docking_time_s=station.docking_time_s,
+                target_soc=station.target_soc,
+                available=station.available,
+            )
+            for station in mission_map.charging_stations
+        ],
+    )
+
+
 def build_demo_map(start_xy: tuple[float, float] = (0.0, 0.0), distance_scale: float = 1.0) -> MissionMap:
     sx, sy = start_xy
     s = float(distance_scale)
@@ -55,6 +93,18 @@ def build_real_astar_segment_executor(config: SimulationConfig) -> tuple[AStarSe
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a lightweight v3.0 semantic task-map demo.")
     parser.add_argument("--output-dir", default="results/v30_task_map_demo")
+    parser.add_argument("--mission-map", default="", help="Path to a v3.0 mission map JSON.")
+    parser.add_argument(
+        "--relative-map",
+        action="store_true",
+        help="Treat mission-map coordinates as offsets from the selected start point.",
+    )
+    parser.add_argument(
+        "--map-scale",
+        type=float,
+        default=None,
+        help="Scale mission-map coordinates when --relative-map is used. Defaults to 0.18 with --real-astar, else 1.0.",
+    )
     parser.add_argument("--real-astar", action="store_true", help="Execute each semantic leg through the legacy A* stack.")
     args = parser.parse_args()
 
@@ -72,7 +122,13 @@ def main() -> None:
         segment_executor, start_xy = build_real_astar_segment_executor(config)
         distance_scale = 0.18
 
-    mission_map = build_demo_map(start_xy=start_xy, distance_scale=distance_scale)
+    if args.mission_map:
+        mission_map = MissionMap.load_json(args.mission_map)
+        if args.relative_map:
+            map_scale = float(args.map_scale) if args.map_scale is not None else (0.18 if args.real_astar else 1.0)
+            mission_map = offset_mission_map(mission_map, start_xy, scale=map_scale)
+    else:
+        mission_map = build_demo_map(start_xy=start_xy, distance_scale=distance_scale)
     mission_map.save_json(output_dir / "mission_map.json")
 
     executor = SimpleTaskExecutor(config, segment_executor=segment_executor)

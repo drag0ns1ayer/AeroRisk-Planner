@@ -1,0 +1,55 @@
+{
+  "name": "v30_template",
+  "start_xy": [0.0, 0.0],
+  "home_xy": [0.0, 0.0],
+  "inspection_points": [
+    {
+      "id": "tower-a",
+      "xy": [600.0, 100.0],
+      "priority": 3.0,
+      "service_time_s": 45.0,
+      "risk_value": 0.2,
+      "altitude_agl_m": null,
+      "deadline_s": 900.0,
+      "status": "pending"
+    },
+    {
+      "id": "ridge-b",
+      "xy": [1200.0, -200.0],
+      "priority": 2.0,
+      "service_time_s": 60.0,
+      "risk_value": 0.35,
+      "altitude_agl_m": null,
+      "deadline_s": null,
+      "status": "pending"
+    },
+    {
+      "id": "valve-c",
+      "xy": [300.0, 900.0],
+      "priority": 4.0,
+      "service_time_s": 30.0,
+      "risk_value": 0.1,
+      "altitude_agl_m": null,
+      "deadline_s": 600.0,
+      "status": "pending"
+    }
+  ],
+  "charging_stations": [
+    {
+      "id": "charge-west",
+      "xy": [100.0, 100.0],
+      "charge_rate_j_per_s": 4000.0,
+      "docking_time_s": 20.0,
+      "target_soc": 0.95,
+      "available": true
+    },
+    {
+      "id": "charge-east",
+      "xy": [900.0, 100.0],
+      "charge_rate_j_per_s": 3500.0,
+      "docking_time_s": 20.0,
+      "target_soc": 0.95,
+      "available": true
+    }
+  ]
+}

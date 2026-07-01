@@ -7,6 +7,7 @@ from core.physics import PhysicsEngine
 from core.planner import AStarPlanner
 from environment.map_manager import MapManager
 from environment.wind_models import WindModelFactory
+from v30.experiments.run_task_map_demo import offset_mission_map
 from v30.mission_map import ChargingStation, InspectionPoint, InspectionStatus, MissionMap
 from v30.segment_executor import AStarSegmentExecutor
 from v30.task_executor import SegmentExecutionResult, SimpleTaskExecutor
@@ -46,6 +47,28 @@ class V30TaskSchedulerTests(unittest.TestCase):
         self.assertEqual(loaded.inspection_points[0].id, "tower-a")
         self.assertEqual(loaded.inspection_points[0].status, InspectionStatus.PENDING)
         self.assertEqual(loaded.charging_stations[0].charge_rate_j_per_s, 3000.0)
+
+    def test_mission_map_template_loads(self):
+        mission_map = MissionMap.load_json("v30/examples/mission_map_template.json")
+
+        self.assertGreaterEqual(len(mission_map.inspection_points), 1)
+        self.assertGreaterEqual(len(mission_map.charging_stations), 1)
+        self.assertTrue(all(point.is_pending for point in mission_map.inspection_points))
+
+    def test_offset_mission_map_treats_coordinates_as_relative(self):
+        mission_map = MissionMap(
+            start_xy=(0.0, 0.0),
+            home_xy=(0.0, 0.0),
+            inspection_points=[InspectionPoint(id="p1", xy=(10.0, 20.0))],
+            charging_stations=[ChargingStation(id="c1", xy=(5.0, 6.0))],
+        )
+
+        shifted = offset_mission_map(mission_map, (100.0, 200.0))
+
+        self.assertEqual(shifted.start_xy, (100.0, 200.0))
+        self.assertEqual(shifted.home_xy, (100.0, 200.0))
+        self.assertEqual(shifted.inspection_points[0].xy, (110.0, 220.0))
+        self.assertEqual(shifted.charging_stations[0].xy, (105.0, 206.0))
 
     def test_scheduler_prefers_high_priority_feasible_inspection(self):
         cfg = SimulationConfig()
