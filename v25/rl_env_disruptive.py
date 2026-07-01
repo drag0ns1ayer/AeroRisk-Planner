@@ -21,6 +21,7 @@ from v25.apas_safety import (
 from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
+from v25.expert_policy import expert_candidate_actions
 from v25.local_hazard import (
     empty_local_hazard_summary,
     local_hazard_gradual_warning,
@@ -1058,24 +1059,7 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         return bool(success), reason
 
     def _expert_candidate_actions(self, emergency: bool = False, mild: bool = False) -> list[np.ndarray]:
-        if emergency:
-            headings = self.config.v25_expert_emergency_heading_actions
-            speeds = self.config.v25_expert_emergency_speed_actions
-            agls = self.config.v25_expert_emergency_agl_actions
-        elif mild:
-            headings = self.config.v25_expert_mild_heading_actions
-            speeds = self.config.v25_expert_mild_speed_actions
-            agls = self.config.v25_expert_mild_agl_actions
-        else:
-            headings = self.config.v25_expert_heading_actions
-            speeds = self.config.v25_expert_speed_actions
-            agls = self.config.v25_expert_agl_actions
-        return [
-            np.array([heading_action, speed_action, agl_action], dtype=float)
-            for heading_action in headings
-            for speed_action in speeds
-            for agl_action in agls
-        ]
+        return expert_candidate_actions(self.config, emergency=emergency, mild=mild)
 
     def _select_expert_action(self, gradual_warning: bool = False) -> tuple[np.ndarray, str]:
         zero_action = np.zeros(3, dtype=float)

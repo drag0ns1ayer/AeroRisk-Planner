@@ -7,6 +7,7 @@ from v25.apas_safety import build_apas_candidate_info, generate_apas_candidates,
 from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.episode_metrics import reset_v25_episode_metrics, reset_v25_runtime_trackers
+from v25.expert_policy import expert_candidate_actions
 from v25.risk_membrane import compute_risk_membrane_summary, risk_membrane_action
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
@@ -764,6 +765,17 @@ class V25TrueWorldTests(unittest.TestCase):
         self.assertEqual(mode, "cautious_trend")
         self.assertTrue(np.allclose(action, mild_action))
         self.assertIn((False, True), calls)
+
+    def test_expert_candidate_helper_uses_distinct_action_sets(self):
+        normal = expert_candidate_actions(self.config)
+        mild = expert_candidate_actions(self.config, mild=True)
+        emergency = expert_candidate_actions(self.config, emergency=True)
+
+        self.assertGreater(len(normal), 0)
+        self.assertGreater(len(mild), 0)
+        self.assertGreater(len(emergency), 0)
+        self.assertTrue(any(abs(float(action[0])) < 1.0 for action in mild))
+        self.assertTrue(any(float(action[1]) < 0.0 for action in emergency))
 
     def test_apas_searches_for_a_safer_residual_command(self):
         env = object.__new__(GuidedDroneEnvV25)
