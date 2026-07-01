@@ -9,6 +9,7 @@ from gymnasium import spaces
 
 from configs.config import SimulationConfig
 from rl_env.drone_env import GuidedDroneEnv
+from v25.control_helpers import advance_waypoint_index, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
@@ -307,50 +308,24 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         return residual + noise
 
     def _refresh_wp_index(self, pos_xy: np.ndarray) -> None:
-        """
-        Advance the reference waypoint, including a conservative stale-waypoint
-        skip for v2.5 execution.
-
-        The base rule only advances when the vehicle enters the current
-        waypoint radius. Under wind and APAS corrections the vehicle can miss a
-        waypoint while still tracking the path corridor; then it keeps chasing a
-        point behind it and times out. This projection-style skip only jumps
-        forward when the nearest path point is clearly downstream and the
-        vehicle remains close to the planned corridor.
-        """
         if not getattr(self, "global_astar_path", None):
             return
 
-        while self.current_wp_idx < len(self.global_astar_path) - 1:
-            wp = self._path_point(self.current_wp_idx)
-            if np.linalg.norm(np.asarray(pos_xy, dtype=float) - wp[:2]) < self.config.rl_waypoint_refresh_radius_m:
-                self.current_wp_idx += 1
-            else:
-                break
-
-        if not bool(getattr(self.config, "v25_stale_waypoint_skip_enabled", True)):
-            return
-        if self.current_wp_idx >= len(self.global_astar_path) - 1:
-            return
-
-        pos = np.asarray(pos_xy, dtype=float)
-        distances = [
-            float(np.linalg.norm(pos - np.asarray(point[:2], dtype=float)))
-            for point in self.global_astar_path
-        ]
-        nearest_idx = int(np.argmin(distances))
-        nearest_dist = float(distances[nearest_idx])
-        min_advance = int(self.config.v25_stale_waypoint_min_advance)
-        corridor_m = float(self.config.v25_stale_waypoint_corridor_m)
-        old_idx = int(self.current_wp_idx)
-
-        if nearest_idx >= old_idx + min_advance and nearest_dist <= corridor_m:
-            self.current_wp_idx = min(nearest_idx, len(self.global_astar_path) - 1)
-            if not bool(getattr(self, "_suppress_waypoint_skip_metrics", False)):
-                self.episode_stale_waypoint_skips = int(getattr(self, "episode_stale_waypoint_skips", 0)) + 1
-                self.episode_stale_waypoint_skip_delta = int(
-                    getattr(self, "episode_stale_waypoint_skip_delta", 0)
-                ) + max(0, self.current_wp_idx - old_idx)
+        new_idx, stale_delta = advance_waypoint_index(
+            path=self.global_astar_path,
+            current_idx=int(self.current_wp_idx),
+            pos_xy=np.asarray(pos_xy, dtype=float),
+            refresh_radius_m=float(self.config.rl_waypoint_refresh_radius_m),
+            stale_skip_enabled=bool(getattr(self.config, "v25_stale_waypoint_skip_enabled", True)),
+            stale_min_advance=int(self.config.v25_stale_waypoint_min_advance),
+            stale_corridor_m=float(self.config.v25_stale_waypoint_corridor_m),
+        )
+        self.current_wp_idx = int(new_idx)
+        if stale_delta > 0 and not bool(getattr(self, "_suppress_waypoint_skip_metrics", False)):
+            self.episode_stale_waypoint_skips = int(getattr(self, "episode_stale_waypoint_skips", 0)) + 1
+            self.episode_stale_waypoint_skip_delta = int(
+                getattr(self, "episode_stale_waypoint_skip_delta", 0)
+            ) + int(stale_delta)
 
     def _astar_base_command(self) -> dict:
         """
@@ -1564,95 +1539,19 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         detects an upper-layer residual that has recently failed to make mission
         progress while risk is not improving and APAS is already working hard.
         """
-        action = np.asarray(raw_action, dtype=float).copy()
-        info: dict[str, Any] = {
-            "do_no_harm_active": False,
-            "do_no_harm_reason": "none",
-            "do_no_harm_recent_progress_sum": 0.0,
-            "do_no_harm_recent_risk_delta": 0.0,
-            "do_no_harm_recent_apas_interventions": 0,
-            "do_no_harm_recent_segment_rejections": 0,
-            "do_no_harm_recent_no_valid_candidates": 0,
-        }
-        if not bool(getattr(self.config, "v25_do_no_harm_gate_enabled", True)):
-            self.last_do_no_harm_active = False
-            self.last_do_no_harm_reason = "disabled"
-            info["do_no_harm_reason"] = "disabled"
-            return action, info
-
-        upper_layer_active = float(np.linalg.norm(action)) >= float(self.config.v25_do_no_harm_min_raw_action_norm)
-        if self.do_no_harm_cooldown_steps_remaining > 0:
-            self.do_no_harm_cooldown_steps_remaining -= 1
-            if upper_layer_active:
-                self.last_do_no_harm_active = True
-                self.last_do_no_harm_reason = "cooldown"
-                self.episode_do_no_harm_suppressed_steps += 1
-                self.episode_do_no_harm_cooldown_steps += 1
-                info.update(do_no_harm_active=True, do_no_harm_reason="cooldown")
-                return np.zeros_like(action), info
-            self.last_do_no_harm_active = False
-            self.last_do_no_harm_reason = "cooldown_idle"
-            info["do_no_harm_reason"] = "cooldown_idle"
-            return action, info
-
-        window = int(max(1, self.config.v25_do_no_harm_window_steps))
-        if not upper_layer_active or len(self.do_no_harm_history) < window:
-            self.last_do_no_harm_active = False
-            self.last_do_no_harm_reason = "inactive" if not upper_layer_active else "insufficient_history"
-            info["do_no_harm_reason"] = self.last_do_no_harm_reason
-            return action, info
-
-        recent = list(self.do_no_harm_history)[-window:]
-        progress_sum = float(sum(float(item["progress_m"]) for item in recent))
-        risk_delta = float(float(recent[-1]["p_crash"]) - float(recent[0]["p_crash"]))
-        apas_interventions = int(sum(int(item["apas_intervened"]) for item in recent))
-        segment_rejections = int(sum(int(item["apas_segment_rejections"]) for item in recent))
-        no_valid_candidates = int(sum(int(item["apas_no_valid_candidate"]) for item in recent))
-        info.update(
-            do_no_harm_recent_progress_sum=progress_sum,
-            do_no_harm_recent_risk_delta=risk_delta,
-            do_no_harm_recent_apas_interventions=apas_interventions,
-            do_no_harm_recent_segment_rejections=segment_rejections,
-            do_no_harm_recent_no_valid_candidates=no_valid_candidates,
+        action, info, cooldown, event_started, suppressed_step, cooldown_step = evaluate_do_no_harm_gate(
+            raw_action=raw_action,
+            history=list(self.do_no_harm_history),
+            cooldown_steps_remaining=int(self.do_no_harm_cooldown_steps_remaining),
+            local_hazard=local_hazard,
+            config=self.config,
         )
-
-        bad_progress = progress_sum <= float(self.config.v25_do_no_harm_min_progress_sum_m)
-        risk_not_improving = risk_delta >= -float(self.config.v25_do_no_harm_risk_drop_eps)
-        apas_struggling = (
-            apas_interventions >= int(self.config.v25_do_no_harm_min_apas_interventions)
-            or segment_rejections >= int(self.config.v25_do_no_harm_min_segment_rejections)
-            or no_valid_candidates >= int(self.config.v25_do_no_harm_min_no_valid_candidates)
-        )
-        slow_into_risk_wall = (
-            risk_not_improving
-            and progress_sum <= float(self.config.v25_do_no_harm_slow_trap_max_progress_sum_m)
-            and float(action[1]) <= float(self.config.v25_do_no_harm_slow_trap_speed_action)
-            and (
-                float(local_hazard.get("risk_membrane_no_escape_gap", 0.0)) >= 0.5
-                or float(local_hazard.get("risk_membrane_wall_ahead", 0.0)) >= 0.5
-                or float(local_hazard.get("forward_danger", 0.0)) >= float(self.config.v25_expert_hard_risk_threshold)
-            )
-        )
-        if bad_progress and risk_not_improving and apas_struggling:
-            self.do_no_harm_cooldown_steps_remaining = int(self.config.v25_do_no_harm_cooldown_steps)
-            self.episode_do_no_harm_events += 1
-            self.episode_do_no_harm_suppressed_steps += 1
-            self.last_do_no_harm_active = True
-            self.last_do_no_harm_reason = "bad_progress_risk_not_improving"
-            info.update(do_no_harm_active=True, do_no_harm_reason="bad_progress_risk_not_improving")
-            return np.zeros_like(action), info
-        if slow_into_risk_wall:
-            self.do_no_harm_cooldown_steps_remaining = int(self.config.v25_do_no_harm_cooldown_steps)
-            self.episode_do_no_harm_events += 1
-            self.episode_do_no_harm_suppressed_steps += 1
-            self.last_do_no_harm_active = True
-            self.last_do_no_harm_reason = "slow_into_risk_wall"
-            info.update(do_no_harm_active=True, do_no_harm_reason="slow_into_risk_wall")
-            return np.zeros_like(action), info
-
-        self.last_do_no_harm_active = False
-        self.last_do_no_harm_reason = "clear"
-        info["do_no_harm_reason"] = "clear"
+        self.do_no_harm_cooldown_steps_remaining = int(cooldown)
+        self.last_do_no_harm_active = bool(info.get("do_no_harm_active", False))
+        self.last_do_no_harm_reason = str(info.get("do_no_harm_reason", "none"))
+        self.episode_do_no_harm_events += int(event_started)
+        self.episode_do_no_harm_suppressed_steps += int(suppressed_step)
+        self.episode_do_no_harm_cooldown_steps += int(cooldown_step)
         return action, info
 
     def step(self, action: np.ndarray):
