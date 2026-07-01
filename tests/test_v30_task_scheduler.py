@@ -2,8 +2,14 @@ import unittest
 
 from configs.config import SimulationConfig
 from core.battery_manager import BatteryManager
+from core.estimator import StateEstimator
+from core.physics import PhysicsEngine
+from core.planner import AStarPlanner
+from environment.map_manager import MapManager
+from environment.wind_models import WindModelFactory
 from v30.mission_map import ChargingStation, InspectionPoint, InspectionStatus, MissionMap
-from v30.task_executor import SimpleTaskExecutor
+from v30.segment_executor import AStarSegmentExecutor
+from v30.task_executor import SegmentExecutionResult, SimpleTaskExecutor
 from v30.task_scheduler import GreedyTaskScheduler, SchedulerState, TaskSchedulerWeights
 
 
@@ -162,3 +168,70 @@ class V30TaskSchedulerTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(set(result.completed_inspections), {"first", "second"})
         self.assertGreaterEqual(result.charging_visits, 1)
+
+    def test_simple_task_executor_can_use_segment_executor_adapter(self):
+        class FakeSegmentExecutor:
+            def __init__(self):
+                self.calls = []
+
+            def execute_leg(self, start_xy, goal_xy, start_time_s, remaining_energy_j):
+                self.calls.append((start_xy, goal_xy, start_time_s, remaining_energy_j))
+                return SegmentExecutionResult(
+                    success=True,
+                    end_position_xy=goal_xy,
+                    elapsed_time_s=12.0,
+                    energy_used_j=500.0,
+                    remaining_energy_j=remaining_energy_j - 500.0,
+                )
+
+        cfg = SimulationConfig()
+        segment_executor = FakeSegmentExecutor()
+        scheduler = GreedyTaskScheduler(
+            cfg,
+            energy_estimator=lambda a, b: 1000.0,
+            time_estimator=lambda a, b: 10.0,
+        )
+        executor = SimpleTaskExecutor(cfg, scheduler=scheduler, segment_executor=segment_executor)
+        mission_map = MissionMap(
+            start_xy=(0.0, 0.0),
+            home_xy=(0.0, 0.0),
+            inspection_points=[InspectionPoint(id="p1", xy=(100.0, 0.0), service_time_s=5.0)],
+        )
+
+        result = executor.execute(mission_map)
+
+        self.assertTrue(result.success)
+        self.assertEqual(len(segment_executor.calls), 1)
+        self.assertEqual(result.total_time_s, 17.0)
+        self.assertEqual(result.total_energy_used_j, 500.0)
+
+    def test_astar_segment_executor_runs_short_leg(self):
+        cfg = SimulationConfig()
+        cfg.max_replans = 3
+        cfg.max_mission_time_s = 120.0
+        cfg.mission_update_interval_s = 30.0
+        cfg.cruise_speed_mps = 20.0
+        cfg.battery_capacity_j = 500_000.0
+
+        map_manager = MapManager(cfg)
+        wind_model = WindModelFactory.create("slope", cfg, bounds=map_manager.get_bounds())
+        estimator = StateEstimator(map_manager, wind_model, cfg)
+        physics = PhysicsEngine(cfg)
+        battery = BatteryManager(cfg)
+        planner = AStarPlanner(cfg, estimator, physics)
+        segment_executor = AStarSegmentExecutor(cfg, estimator, physics, battery, planner)
+
+        min_x, _, min_y, _ = estimator.get_bounds()
+        start_xy = (min_x + 100.0, min_y + 100.0)
+        goal_xy = (min_x + 250.0, min_y + 250.0)
+
+        result = segment_executor.execute_leg(
+            start_xy=start_xy,
+            goal_xy=goal_xy,
+            start_time_s=20.0,
+            remaining_energy_j=cfg.battery_capacity_j,
+        )
+
+        self.assertTrue(result.success, result.failure_reason)
+        self.assertGreaterEqual(result.elapsed_time_s, 0.0)
+        self.assertLessEqual(result.remaining_energy_j, cfg.battery_capacity_j)

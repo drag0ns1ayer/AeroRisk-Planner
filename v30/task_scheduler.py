@@ -37,6 +37,7 @@ class ScheduledTarget:
     reason: str = ""
     estimated_energy_j: float = 0.0
     estimated_time_s: float = 0.0
+    service_time_s: float = 0.0
 
 
 EnergyEstimator = Callable[[Point2D, Point2D], float]
@@ -139,7 +140,8 @@ class GreedyTaskScheduler:
                     score=float(score),
                     reason="best feasible inspection",
                     estimated_energy_j=float(leg_energy),
-                    estimated_time_s=float(leg_time + max(float(point.service_time_s), 0.0)),
+                    estimated_time_s=float(leg_time),
+                    service_time_s=max(float(point.service_time_s), 0.0),
                 )
             )
 
@@ -162,7 +164,8 @@ class GreedyTaskScheduler:
                     score=-float(leg_energy),
                     reason="charge before next inspection",
                     estimated_energy_j=float(leg_energy),
-                    estimated_time_s=float(leg_time + max(float(charger.docking_time_s), 0.0)),
+                    estimated_time_s=float(leg_time),
+                    service_time_s=max(float(charger.docking_time_s), 0.0),
                 )
             )
 

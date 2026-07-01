@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from configs.config import SimulationConfig
 from core.battery_manager import BatteryManager
@@ -32,6 +33,27 @@ class TaskExecutionResult:
     events: list[TaskExecutionEvent] = field(default_factory=list)
 
 
+@dataclass
+class SegmentExecutionResult:
+    success: bool
+    end_position_xy: Point2D
+    elapsed_time_s: float
+    energy_used_j: float
+    remaining_energy_j: float
+    failure_reason: str | None = None
+
+
+class SegmentExecutor(Protocol):
+    def execute_leg(
+        self,
+        start_xy: Point2D,
+        goal_xy: Point2D,
+        start_time_s: float,
+        remaining_energy_j: float,
+    ) -> SegmentExecutionResult:
+        ...
+
+
 class SimpleTaskExecutor:
     """
     Lightweight semantic mission executor for v3.0.
@@ -46,10 +68,12 @@ class SimpleTaskExecutor:
         config: SimulationConfig,
         scheduler: GreedyTaskScheduler | None = None,
         battery_manager: BatteryManager | None = None,
+        segment_executor: SegmentExecutor | None = None,
     ):
         self.config = config
         self.battery_manager = battery_manager or BatteryManager(config)
         self.scheduler = scheduler or GreedyTaskScheduler(config, battery_manager=self.battery_manager)
+        self.segment_executor = segment_executor
 
     def execute(self, mission_map: MissionMap, max_steps: int = 200) -> TaskExecutionResult:
         state = SchedulerState(
@@ -74,7 +98,8 @@ class SimpleTaskExecutor:
                 break
 
             if not self._consume_travel(state, target, result):
-                result.failure_reason = "battery depleted while traveling"
+                if result.failure_reason is None:
+                    result.failure_reason = "battery depleted while traveling"
                 break
 
             if target.kind == "inspection":
@@ -103,6 +128,32 @@ class SimpleTaskExecutor:
         result: TaskExecutionResult,
     ) -> bool:
         assert target.xy is not None
+        if self.segment_executor is not None:
+            segment = self.segment_executor.execute_leg(
+                start_xy=state.position_xy,
+                goal_xy=target.xy,
+                start_time_s=state.current_time_s,
+                remaining_energy_j=state.remaining_energy_j,
+            )
+            if not segment.success:
+                result.failure_reason = segment.failure_reason
+                return False
+            state.position_xy = segment.end_position_xy
+            state.current_time_s += float(segment.elapsed_time_s)
+            state.remaining_energy_j = float(segment.remaining_energy_j)
+            result.total_energy_used_j += float(segment.energy_used_j)
+            result.events.append(
+                TaskExecutionEvent(
+                    time_s=float(state.current_time_s),
+                    kind=f"arrive_{target.kind}",
+                    target_id=target.target_id,
+                    position_xy=state.position_xy,
+                    remaining_energy_j=float(state.remaining_energy_j),
+                    detail=f"segment_executor: {target.reason}",
+                )
+            )
+            return True
+
         travel_energy = float(target.estimated_energy_j)
         if not self.battery_manager.can_consume(state.remaining_energy_j, travel_energy):
             return False
@@ -132,8 +183,8 @@ class SimpleTaskExecutor:
         assert target.target_id is not None
         point = mission_map.get_inspection(target.target_id)
         mission_map.mark_done(point.id)
+        state.current_time_s += float(target.service_time_s)
         result.completed_inspections.append(point.id)
-        # target.estimated_time_s already includes service time in the scheduler.
         result.events.append(
             TaskExecutionEvent(
                 time_s=float(state.current_time_s),
@@ -154,6 +205,7 @@ class SimpleTaskExecutor:
     ) -> None:
         assert target.target_id is not None
         station = next(station for station in mission_map.charging_stations if station.id == target.target_id)
+        state.current_time_s += float(target.service_time_s)
         target_energy = float(self.config.battery_capacity_j) * float(station.target_soc)
         missing_energy = max(0.0, target_energy - state.remaining_energy_j)
         charge_time = missing_energy / max(float(station.charge_rate_j_per_s), 1e-6)
