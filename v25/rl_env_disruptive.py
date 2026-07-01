@@ -34,6 +34,13 @@ from v25.local_hazard import (
     local_hazard_memory_item,
 )
 from v25.risk_membrane import compute_risk_membrane_summary, empty_risk_membrane_summary, risk_membrane_action
+from v25.sensors import (
+    circle_oracle_features,
+    circle_oracle_sample_points,
+    compose_sensor_features,
+    sector_radar_features,
+    world_vector_to_body,
+)
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
 
@@ -266,129 +273,31 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         }
 
     def _world_vector_to_body(self, vec_xy: np.ndarray) -> np.ndarray:
-        heading_rad = math.radians(float(self.current_heading))
-        forward = np.array([math.cos(heading_rad), math.sin(heading_rad)], dtype=float)
-        left = np.array([-math.sin(heading_rad), math.cos(heading_rad)], dtype=float)
-        return np.array([float(np.dot(vec_xy, forward)), float(np.dot(vec_xy, left))], dtype=float)
+        return world_vector_to_body(vec_xy, float(self.current_heading))
 
     def _circle_oracle_sample_points(self) -> list[np.ndarray]:
-        origin = np.asarray(self.current_pos[:2], dtype=float)
-        radius_m = float(self.config.v25_radar_radius_m)
-        sample_count = int(self.config.v25_circle_oracle_samples)
-        heading_rad = math.radians(float(self.current_heading))
-
-        sample_points = [origin]
-        front_angles_deg = (
-            -75.0, -60.0, -45.0, -32.0, -22.0, -12.0, -6.0,
-            0.0,
-            6.0, 12.0, 22.0, 32.0, 45.0, 60.0, 75.0,
+        return circle_oracle_sample_points(
+            origin_xy=np.asarray(self.current_pos[:2], dtype=float),
+            heading_deg=float(self.current_heading),
+            radius_m=float(self.config.v25_radar_radius_m),
+            sample_count=int(self.config.v25_circle_oracle_samples),
         )
-        front_radii = (0.15, 0.25, 0.35, 0.50, 0.65, 0.80, 0.92, 1.00)
-        for radius_scale in front_radii:
-            for rel_angle_deg in front_angles_deg:
-                if len(sample_points) >= sample_count:
-                    break
-                angle = heading_rad + math.radians(rel_angle_deg)
-                sample_points.append(
-                    origin + radius_scale * radius_m * np.array([math.cos(angle), math.sin(angle)], dtype=float)
-                )
-            if len(sample_points) >= sample_count:
-                break
-
-        rings = (0.25, 0.50, 0.75, 1.00)
-        per_ring = max(8, int(math.ceil(max(sample_count - len(sample_points), 1) / len(rings))))
-        for ring in rings:
-            for idx in range(per_ring):
-                if len(sample_points) >= sample_count:
-                    break
-                angle = 2.0 * math.pi * idx / per_ring
-                sample_points.append(origin + ring * radius_m * np.array([math.cos(angle), math.sin(angle)]))
-            if len(sample_points) >= sample_count:
-                break
-
-        return sample_points
 
     def _circle_oracle_features(self) -> list[float]:
         if self.disruptions is None:
             return [0.0] * self.CIRCLE_ORACLE_FEATURES
 
-        origin = np.asarray(self.current_pos[:2], dtype=float)
-        radius_m = float(self.config.v25_radar_radius_m)
-        heading_rad = math.radians(float(self.current_heading))
-        forward = np.array([math.cos(heading_rad), math.sin(heading_rad)], dtype=float)
-
-        sample_points = self._circle_oracle_sample_points()
-
-        dangers = []
-        winds = []
-        offsets = []
-        forward_dangers = []
-        max_wind_mag = 0.0
-        max_wind_vec = np.zeros(2, dtype=float)
-        nearest_danger_dist = radius_m
-        nearest_danger_vec = np.zeros(2, dtype=float)
-        weighted_danger_vec = np.zeros(2, dtype=float)
-        weighted_danger_sum = 0.0
-
-        for point in sample_points:
-            offset = np.asarray(point - origin, dtype=float)
-            dist = float(np.linalg.norm(offset))
-            travel_dir = offset / dist if dist > 1e-6 else forward
-            wind, _ = self.disruptions.disturbance_at(float(point[0]), float(point[1]), self.current_time, travel_dir)
-            danger = float(self.disruptions.risk_bonus_at(float(point[0]), float(point[1]), self.current_time))
-            storm_danger = float(self.disruptions.destructive_storm.danger_at(float(point[0]), float(point[1]), self.current_time))
-            danger = max(danger, storm_danger)
-
-            dangers.append(danger)
-            winds.append(wind)
-            offsets.append(offset)
-            if dist > 1e-6 and np.dot(offset / dist, forward) > math.cos(math.radians(45.0)):
-                forward_dangers.append(danger)
-
-            wind_mag = float(np.linalg.norm(wind))
-            if wind_mag > max_wind_mag:
-                max_wind_mag = wind_mag
-                max_wind_vec = wind
-            if danger > 1e-6:
-                if dist < nearest_danger_dist:
-                    nearest_danger_dist = dist
-                    nearest_danger_vec = offset
-                weighted_danger_vec += offset * danger
-                weighted_danger_sum += danger
-
-        mean_wind = np.mean(np.asarray(winds, dtype=float), axis=0) if winds else np.zeros(2, dtype=float)
-        mean_wind_body = self._world_vector_to_body(mean_wind) / max(float(self.config.max_wind_speed), 1e-6)
-        max_wind_body = self._world_vector_to_body(max_wind_vec) / max(float(self.config.max_wind_speed), 1e-6)
-
-        if np.linalg.norm(nearest_danger_vec) > 1e-6:
-            nearest_dir_body = self._world_vector_to_body(nearest_danger_vec / np.linalg.norm(nearest_danger_vec))
-        else:
-            nearest_dir_body = np.zeros(2, dtype=float)
-        if weighted_danger_sum > 1e-6 and np.linalg.norm(weighted_danger_vec) > 1e-6:
-            centroid_vec = weighted_danger_vec / weighted_danger_sum
-            centroid_dir_body = self._world_vector_to_body(centroid_vec / np.linalg.norm(centroid_vec))
-        else:
-            centroid_dir_body = np.zeros(2, dtype=float)
-
-        max_danger = float(max(dangers)) if dangers else 0.0
-        mean_danger = float(np.mean(dangers)) if dangers else 0.0
-        nearest_closeness = 1.0 - min(nearest_danger_dist / max(radius_m, 1e-6), 1.0)
-        forward_danger = float(max(forward_dangers)) if forward_dangers else 0.0
-
-        return [
-            float(np.clip(max_danger, 0.0, 1.0)),
-            float(np.clip(mean_danger, 0.0, 1.0)),
-            float(np.clip(nearest_closeness, 0.0, 1.0)),
-            float(np.clip(nearest_dir_body[0], -1.0, 1.0)),
-            float(np.clip(nearest_dir_body[1], -1.0, 1.0)),
-            float(np.clip(centroid_dir_body[0], -1.0, 1.0)),
-            float(np.clip(centroid_dir_body[1], -1.0, 1.0)),
-            float(np.clip(mean_wind_body[0], -2.0, 2.0)),
-            float(np.clip(mean_wind_body[1], -2.0, 2.0)),
-            float(np.clip(max_wind_body[0], -2.0, 2.0)),
-            float(np.clip(max_wind_body[1], -2.0, 2.0)),
-            float(np.clip(forward_danger, 0.0, 1.0)),
-        ]
+        return circle_oracle_features(
+            origin_xy=np.asarray(self.current_pos[:2], dtype=float),
+            heading_deg=float(self.current_heading),
+            current_time_s=float(self.current_time),
+            sample_points=self._circle_oracle_sample_points(),
+            radius_m=float(self.config.v25_radar_radius_m),
+            max_wind_speed=float(self.config.max_wind_speed),
+            disturbance_at=self.disruptions.disturbance_at,
+            risk_bonus_at=self.disruptions.risk_bonus_at,
+            storm_danger_at=self.disruptions.destructive_storm.danger_at,
+        )
 
     def _risk_membrane_summary(self) -> dict[str, float]:
         if (
@@ -415,27 +324,18 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
     def _sector_radar_features(self) -> list[float]:
         if self.disruptions is None:
             return [0.0] * (int(self.config.v25_radar_sectors) * self.RADAR_FEATURES_PER_SECTOR)
-        radar_values = []
-        for sector_idx in range(int(self.config.v25_radar_sectors)):
-            wind_mag, wind_dir_sin, danger, danger_closeness = self.disruptions.radar_sector(
-                origin_xy=np.asarray(self.current_pos[:2], dtype=float),
-                heading_deg=float(self.current_heading),
-                sector_idx=sector_idx,
-                sector_count=int(self.config.v25_radar_sectors),
-                radius_m=float(self.config.v25_radar_radius_m),
-                t_s=float(self.current_time),
-            )
-            noisy_wind = wind_mag + float(self.sensor_rng.normal(0.0, self.config.v25_sensor_wind_noise_std_mps))
-            noisy_danger = danger + float(self.sensor_rng.normal(0.0, self.config.v25_sensor_risk_noise_std))
-            radar_values.extend(
-                [
-                    float(np.clip(noisy_wind / self.config.max_wind_speed, 0.0, 2.0)),
-                    float(np.clip(wind_dir_sin, -1.0, 1.0)),
-                    float(np.clip(noisy_danger, 0.0, 1.0)),
-                    float(np.clip(danger_closeness, 0.0, 1.0)),
-                ]
-            )
-        return radar_values
+        return sector_radar_features(
+            origin_xy=np.asarray(self.current_pos[:2], dtype=float),
+            heading_deg=float(self.current_heading),
+            current_time_s=float(self.current_time),
+            sector_count=int(self.config.v25_radar_sectors),
+            radius_m=float(self.config.v25_radar_radius_m),
+            max_wind_speed=float(self.config.max_wind_speed),
+            wind_noise_std_mps=float(self.config.v25_sensor_wind_noise_std_mps),
+            risk_noise_std=float(self.config.v25_sensor_risk_noise_std),
+            sensor_rng=self.sensor_rng,
+            radar_sector=self.disruptions.radar_sector,
+        )
 
     def _empty_local_hazard_summary(self) -> dict[str, float]:
         return empty_local_hazard_summary()
@@ -523,7 +423,6 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
 
     def _sensor_features(self) -> np.ndarray:
         measured_residual = self._measured_residual_wind()
-        residual_delta = measured_residual - self.last_measured_residual_wind
 
         base_command = self._astar_base_command()
         expected_ground_xy = base_command["desired_ground_velocity_xy"]
@@ -534,17 +433,13 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         else:
             local_view_values = self._sector_radar_features()
 
-        return np.asarray(
-            [
-                measured_residual[0] / self.config.max_wind_speed,
-                measured_residual[1] / self.config.max_wind_speed,
-                residual_delta[0] / self.config.max_wind_speed,
-                residual_delta[1] / self.config.max_wind_speed,
-                tracking_velocity_error[0] / self.config.rl_speed_max,
-                tracking_velocity_error[1] / self.config.rl_speed_max,
-                *local_view_values,
-            ],
-            dtype=np.float32,
+        return compose_sensor_features(
+            measured_residual_wind=measured_residual,
+            last_measured_residual_wind=self.last_measured_residual_wind,
+            tracking_velocity_error=tracking_velocity_error,
+            local_view_values=local_view_values,
+            max_wind_speed=float(self.config.max_wind_speed),
+            rl_speed_max=float(self.config.rl_speed_max),
         )
 
     def _tracking_velocity_error(self, base_command: dict) -> np.ndarray:

@@ -20,6 +20,7 @@ from v25.rl_env_disruptive import (
     compute_residual_control_cost,
     compute_residual_gate,
 )
+from v25.sensors import circle_oracle_sample_points, compose_sensor_features
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
 
@@ -154,6 +155,38 @@ class V25TrueWorldTests(unittest.TestCase):
 
         self.assertEqual(len(points), self.config.v25_circle_oracle_samples)
         self.assertGreaterEqual(front_count, 60)
+
+    def test_circle_oracle_sample_helper_front_arc_densely(self):
+        points = circle_oracle_sample_points(
+            origin_xy=np.array([0.0, 0.0], dtype=float),
+            heading_deg=0.0,
+            radius_m=float(self.config.v25_radar_radius_m),
+            sample_count=int(self.config.v25_circle_oracle_samples),
+        )
+        offsets = [point for point in points[1:]]
+        front_count = sum(
+            1
+            for offset in offsets
+            if np.linalg.norm(offset) > 1e-6
+            and offset[0] / np.linalg.norm(offset) > np.cos(np.radians(60.0))
+        )
+
+        self.assertEqual(len(points), self.config.v25_circle_oracle_samples)
+        self.assertGreaterEqual(front_count, 60)
+
+    def test_compose_sensor_features_includes_tracking_error(self):
+        features = compose_sensor_features(
+            measured_residual_wind=np.array([2.0, -4.0], dtype=float),
+            last_measured_residual_wind=np.array([1.0, -1.0], dtype=float),
+            tracking_velocity_error=np.array([3.0, -6.0], dtype=float),
+            local_view_values=[0.25, 0.5],
+            max_wind_speed=10.0,
+            rl_speed_max=30.0,
+        )
+
+        self.assertEqual(features.dtype, np.float32)
+        self.assertEqual(len(features), GuidedDroneEnvV25.SENSOR_BASE_FEATURES + 2)
+        self.assertTrue(np.allclose(features[:6], [0.2, -0.4, 0.1, -0.3, 0.1, -0.2]))
 
     def test_local_hazard_history_reports_positive_trend(self):
         env = object.__new__(GuidedDroneEnvV25)
