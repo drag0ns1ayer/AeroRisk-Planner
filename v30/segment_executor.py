@@ -103,4 +103,5 @@ class AStarSegmentExecutor:
             energy_used_j=max(0.0, start_energy - float(state.remaining_energy_j)),
             remaining_energy_j=float(state.remaining_energy_j),
             failure_reason=state.failure_reason,
+            path_xyz=[tuple(map(float, point)) for point in state.traveled_path_xyz],
         )

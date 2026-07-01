@@ -30,6 +30,7 @@ class TaskExecutionResult:
     final_position_xy: Point2D = (0.0, 0.0)
     remaining_energy_j: float = 0.0
     failure_reason: str | None = None
+    actual_path_xyz: list[tuple[float, float, float]] = field(default_factory=list)
     events: list[TaskExecutionEvent] = field(default_factory=list)
 
 
@@ -41,6 +42,7 @@ class SegmentExecutionResult:
     energy_used_j: float
     remaining_energy_j: float
     failure_reason: str | None = None
+    path_xyz: list[tuple[float, float, float]] = field(default_factory=list)
 
 
 class SegmentExecutor(Protocol):
@@ -85,6 +87,7 @@ class SimpleTaskExecutor:
             success=False,
             final_position_xy=state.position_xy,
             remaining_energy_j=state.remaining_energy_j,
+            actual_path_xyz=[(state.position_xy[0], state.position_xy[1], 0.0)],
         )
 
         for _ in range(max_steps):
@@ -142,6 +145,13 @@ class SimpleTaskExecutor:
             state.current_time_s += float(segment.elapsed_time_s)
             state.remaining_energy_j = float(segment.remaining_energy_j)
             result.total_energy_used_j += float(segment.energy_used_j)
+            if segment.path_xyz:
+                if result.actual_path_xyz and result.actual_path_xyz[-1] == segment.path_xyz[0]:
+                    result.actual_path_xyz.extend(segment.path_xyz[1:])
+                else:
+                    result.actual_path_xyz.extend(segment.path_xyz)
+            else:
+                result.actual_path_xyz.append((state.position_xy[0], state.position_xy[1], 0.0))
             result.events.append(
                 TaskExecutionEvent(
                     time_s=float(state.current_time_s),
@@ -161,6 +171,7 @@ class SimpleTaskExecutor:
         state.current_time_s += float(target.estimated_time_s)
         state.position_xy = target.xy
         result.total_energy_used_j += travel_energy
+        result.actual_path_xyz.append((state.position_xy[0], state.position_xy[1], 0.0))
         result.events.append(
             TaskExecutionEvent(
                 time_s=float(state.current_time_s),

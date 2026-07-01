@@ -205,6 +205,7 @@ class V30TaskSchedulerTests(unittest.TestCase):
                     elapsed_time_s=12.0,
                     energy_used_j=500.0,
                     remaining_energy_j=remaining_energy_j - 500.0,
+                    path_xyz=[(start_xy[0], start_xy[1], 100.0), (goal_xy[0], goal_xy[1], 120.0)],
                 )
 
         cfg = SimulationConfig()
@@ -227,6 +228,7 @@ class V30TaskSchedulerTests(unittest.TestCase):
         self.assertEqual(len(segment_executor.calls), 1)
         self.assertEqual(result.total_time_s, 17.0)
         self.assertEqual(result.total_energy_used_j, 500.0)
+        self.assertEqual(result.actual_path_xyz[-1], (100.0, 0.0, 120.0))
 
     def test_astar_segment_executor_runs_short_leg(self):
         cfg = SimulationConfig()
@@ -258,3 +260,4 @@ class V30TaskSchedulerTests(unittest.TestCase):
         self.assertTrue(result.success, result.failure_reason)
         self.assertGreaterEqual(result.elapsed_time_s, 0.0)
         self.assertLessEqual(result.remaining_energy_j, cfg.battery_capacity_j)
+        self.assertGreaterEqual(len(result.path_xyz), 2)
