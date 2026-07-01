@@ -160,3 +160,77 @@ def evaluate_do_no_harm_gate(
 
     info["do_no_harm_reason"] = "clear"
     return action, info, 0, False, False, False
+
+
+def compute_evaluation_costs(
+    *,
+    action: np.ndarray,
+    action_delta: float,
+    apas_info: dict[str, Any],
+    expert_mode: str,
+    base_energy_step_j: float,
+    config: SimulationConfig,
+) -> dict[str, float]:
+    """
+    Compute reporting-only maneuver energy and safety intervention burden.
+
+    These metrics do not affect the executed action. They make comparisons
+    fairer by making APAS and emergency behavior visible as extra burden rather
+    than treating last-resort safety interventions as free.
+    """
+    action_arr = np.asarray(action, dtype=float)
+    mode = str(expert_mode)
+
+    expert_mode_burden = 0.0
+    if mode in ("cautious", "cautious_trend"):
+        expert_mode_burden = float(config.v25_eval_expert_cautious_burden)
+    elif mode in ("avoiding", "band_avoidance"):
+        expert_mode_burden = float(config.v25_eval_expert_avoiding_burden)
+    elif mode in ("emergency", "pre_emergency_slow"):
+        expert_mode_burden = float(config.v25_eval_expert_emergency_burden)
+    elif mode == "recovering":
+        expert_mode_burden = float(config.v25_eval_expert_recovering_burden)
+
+    residual_maneuver_extra_energy_j = (
+        float(config.v25_eval_maneuver_heading_energy_j) * abs(float(action_arr[0])) ** 2
+        + float(config.v25_eval_maneuver_speed_energy_j) * abs(float(action_arr[1])) ** 2
+        + float(config.v25_eval_maneuver_agl_energy_j) * abs(float(action_arr[2])) ** 2
+        + float(config.v25_eval_maneuver_action_delta_energy_j) * (float(action_delta) ** 2)
+    )
+
+    apas_maneuver_extra_energy_j = 0.0
+    if bool(apas_info.get("apas_intervened", False)):
+        apas_maneuver_extra_energy_j = (
+            float(config.v25_eval_apas_fixed_energy_j)
+            + float(config.v25_eval_apas_heading_energy_j_per_deg)
+            * abs(float(apas_info.get("apas_heading_offset_deg", 0.0)))
+            + float(config.v25_eval_apas_speed_reduction_energy_j_per_mps2)
+            * (max(0.0, float(apas_info.get("apas_speed_reduction_mps", 0.0))) ** 2)
+            + float(config.v25_eval_apas_agl_energy_j_per_m)
+            * max(0.0, float(apas_info.get("apas_agl_increment_m", 0.0)))
+        )
+
+    maneuver_extra_energy_j = float(residual_maneuver_extra_energy_j + apas_maneuver_extra_energy_j)
+    safety_intervention_burden = (
+        expert_mode_burden
+        + float(config.v25_eval_apas_intervention_burden)
+        * float(bool(apas_info.get("apas_intervened", False)))
+        + float(config.v25_eval_apas_segment_rejection_burden)
+        * float(apas_info.get("apas_segment_rejections", 0))
+        + float(config.v25_eval_apas_no_valid_burden)
+        * float(bool(apas_info.get("apas_no_valid_candidate", False)))
+    )
+    adjusted_energy_step_j = (
+        float(base_energy_step_j)
+        + maneuver_extra_energy_j
+        + safety_intervention_burden * float(config.v25_eval_burden_energy_equivalent_j)
+    )
+
+    return {
+        "expert_mode_burden": float(expert_mode_burden),
+        "residual_maneuver_extra_energy_j": float(residual_maneuver_extra_energy_j),
+        "apas_maneuver_extra_energy_j": float(apas_maneuver_extra_energy_j),
+        "maneuver_extra_energy_j": float(maneuver_extra_energy_j),
+        "safety_intervention_burden": float(safety_intervention_burden),
+        "adjusted_energy_step_j": float(adjusted_energy_step_j),
+    }

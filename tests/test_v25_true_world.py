@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from configs.config import SimulationConfig
+from v25.control_helpers import compute_evaluation_costs
 from v25.disruptions import build_disruption_layer_v25
 from v25.rl_env_disruptive import (
     GuidedDroneEnvV25,
@@ -807,6 +808,49 @@ class V25TrueWorldTests(unittest.TestCase):
 
         self.assertEqual(env.current_wp_idx, 0)
         self.assertEqual(env.episode_stale_waypoint_skips, 0)
+
+    def test_evaluation_costs_make_apas_interventions_nonfree(self):
+        costs = compute_evaluation_costs(
+            action=np.zeros(3, dtype=float),
+            action_delta=0.0,
+            apas_info={
+                "apas_intervened": True,
+                "apas_heading_offset_deg": 10.0,
+                "apas_speed_reduction_mps": 2.0,
+                "apas_agl_increment_m": 5.0,
+                "apas_segment_rejections": 3,
+                "apas_no_valid_candidate": False,
+            },
+            expert_mode="inactive",
+            base_energy_step_j=1000.0,
+            config=self.config,
+        )
+
+        self.assertGreater(costs["maneuver_extra_energy_j"], 0.0)
+        self.assertGreater(costs["safety_intervention_burden"], self.config.v25_eval_apas_intervention_burden)
+        self.assertGreater(costs["adjusted_energy_step_j"], 1000.0)
+
+    def test_evaluation_costs_include_expert_mode_burden(self):
+        normal = compute_evaluation_costs(
+            action=np.zeros(3, dtype=float),
+            action_delta=0.0,
+            apas_info={"apas_intervened": False},
+            expert_mode="inactive",
+            base_energy_step_j=1000.0,
+            config=self.config,
+        )
+        emergency = compute_evaluation_costs(
+            action=np.zeros(3, dtype=float),
+            action_delta=0.0,
+            apas_info={"apas_intervened": False},
+            expert_mode="emergency",
+            base_energy_step_j=1000.0,
+            config=self.config,
+        )
+
+        self.assertEqual(normal["safety_intervention_burden"], 0.0)
+        self.assertEqual(emergency["safety_intervention_burden"], self.config.v25_eval_expert_emergency_burden)
+        self.assertGreater(emergency["adjusted_energy_step_j"], normal["adjusted_energy_step_j"])
 
     def test_risk_membrane_detects_front_wall_and_side_gap(self):
         env = object.__new__(GuidedDroneEnvV25)

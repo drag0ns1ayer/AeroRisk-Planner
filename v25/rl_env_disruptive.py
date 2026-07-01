@@ -9,7 +9,7 @@ from gymnasium import spaces
 
 from configs.config import SimulationConfig
 from rl_env.drone_env import GuidedDroneEnv
-from v25.control_helpers import advance_waypoint_index, evaluate_do_no_harm_gate
+from v25.control_helpers import advance_waypoint_index, compute_evaluation_costs, evaluate_do_no_harm_gate
 from v25.disruptions import DisruptionLayerV25, build_disruption_layer_v25
 from v25.true_world_dynamics import TrueWorldDynamicsV25, VehicleStateV25
 
@@ -1779,48 +1779,17 @@ class GuidedDroneEnvV25(GuidedDroneEnv):
         self.episode_expert_band_avoidance_steps += int(expert_mode_this_step == "band_avoidance")
         self.episode_expert_pre_emergency_slow_steps += int(expert_mode_this_step == "pre_emergency_slow")
         self.episode_expert_recovering_steps += int(expert_mode_this_step == "recovering")
-        expert_mode_burden = 0.0
-        if expert_mode_this_step in ("cautious", "cautious_trend"):
-            expert_mode_burden = float(self.config.v25_eval_expert_cautious_burden)
-        elif expert_mode_this_step in ("avoiding", "band_avoidance"):
-            expert_mode_burden = float(self.config.v25_eval_expert_avoiding_burden)
-        elif expert_mode_this_step in ("emergency", "pre_emergency_slow"):
-            expert_mode_burden = float(self.config.v25_eval_expert_emergency_burden)
-        elif expert_mode_this_step == "recovering":
-            expert_mode_burden = float(self.config.v25_eval_expert_recovering_burden)
-
-        residual_maneuver_extra_energy_j = (
-            float(self.config.v25_eval_maneuver_heading_energy_j) * abs(float(action[0])) ** 2
-            + float(self.config.v25_eval_maneuver_speed_energy_j) * abs(float(action[1])) ** 2
-            + float(self.config.v25_eval_maneuver_agl_energy_j) * abs(float(action[2])) ** 2
-            + float(self.config.v25_eval_maneuver_action_delta_energy_j) * (action_delta ** 2)
+        eval_costs = compute_evaluation_costs(
+            action=action,
+            action_delta=action_delta,
+            apas_info=apas_info,
+            expert_mode=expert_mode_this_step,
+            base_energy_step_j=power * self.dt,
+            config=self.config,
         )
-        apas_maneuver_extra_energy_j = 0.0
-        if bool(apas_info.get("apas_intervened", False)):
-            apas_maneuver_extra_energy_j = (
-                float(self.config.v25_eval_apas_fixed_energy_j)
-                + float(self.config.v25_eval_apas_heading_energy_j_per_deg)
-                * abs(float(apas_info.get("apas_heading_offset_deg", 0.0)))
-                + float(self.config.v25_eval_apas_speed_reduction_energy_j_per_mps2)
-                * (max(0.0, float(apas_info.get("apas_speed_reduction_mps", 0.0))) ** 2)
-                + float(self.config.v25_eval_apas_agl_energy_j_per_m)
-                * max(0.0, float(apas_info.get("apas_agl_increment_m", 0.0)))
-            )
-        maneuver_extra_energy_j = float(residual_maneuver_extra_energy_j + apas_maneuver_extra_energy_j)
-        safety_intervention_burden = (
-            expert_mode_burden
-            + float(self.config.v25_eval_apas_intervention_burden)
-            * float(bool(apas_info.get("apas_intervened", False)))
-            + float(self.config.v25_eval_apas_segment_rejection_burden)
-            * float(apas_info.get("apas_segment_rejections", 0))
-            + float(self.config.v25_eval_apas_no_valid_burden)
-            * float(bool(apas_info.get("apas_no_valid_candidate", False)))
-        )
-        adjusted_energy_step_j = (
-            power * self.dt
-            + maneuver_extra_energy_j
-            + safety_intervention_burden * float(self.config.v25_eval_burden_energy_equivalent_j)
-        )
+        maneuver_extra_energy_j = float(eval_costs["maneuver_extra_energy_j"])
+        safety_intervention_burden = float(eval_costs["safety_intervention_burden"])
+        adjusted_energy_step_j = float(eval_costs["adjusted_energy_step_j"])
         self.episode_eval_maneuver_extra_energy_j += maneuver_extra_energy_j
         self.episode_eval_safety_intervention_burden += safety_intervention_burden
         self.episode_eval_adjusted_energy_j += adjusted_energy_step_j
