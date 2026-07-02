@@ -378,7 +378,8 @@ def save_uploaded_map_as_stable_png(uploaded_file, out_path: str) -> tuple[bool,
             return False, "PNG 编码失败。"
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        encoded.tofile(out_path)
+        with open(out_path, "wb") as f:
+            f.write(encoded.tobytes())
         return True, ""
     except Exception as exc:
         return False, str(exc)
