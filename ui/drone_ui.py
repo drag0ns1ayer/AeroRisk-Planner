@@ -637,6 +637,8 @@ def run_v30_inspection_case(
         "success": result.success,
         "completed_inspections": result.completed_inspections,
         "charging_visits": result.charging_visits,
+        "returned_home": result.returned_home,
+        "final_position_xy": result.final_position_xy,
         "total_time_s": result.total_time_s,
         "total_energy_used_j": result.total_energy_used_j,
         "remaining_energy_j": result.remaining_energy_j,

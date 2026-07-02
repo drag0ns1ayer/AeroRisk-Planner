@@ -138,6 +138,79 @@ def _draw_mission_annotations(ax, mission_map: MissionMap):
         ax.scatter(station.xy[0] / 1000.0, station.xy[1] / 1000.0, c="tab:blue", s=80, marker="P", edgecolors="black", label=label, zorder=5)
 
 
+def _draw_static_constraints(ax, estimator: StateEstimator):
+    if not getattr(estimator.config, "enable_nfz", False):
+        return
+    zones = getattr(estimator.config, "nfz_list_km", [])
+    for idx, (cx_km, cy_km, radius_km) in enumerate(zones):
+        label = "Predictable NFZ" if idx == 0 else None
+        nfz = plt.Circle(
+            (float(cx_km), float(cy_km)),
+            float(radius_km),
+            facecolor="red",
+            edgecolor="darkred",
+            linewidth=1.8,
+            alpha=0.18,
+            hatch="///",
+            label=label,
+            zorder=4,
+        )
+        ax.add_patch(nfz)
+        ax.text(
+            float(cx_km),
+            float(cy_km),
+            "NFZ",
+            color="darkred",
+            fontsize=10,
+            fontweight="bold",
+            ha="center",
+            va="center",
+            zorder=7,
+        )
+
+
+def _draw_forecast_storms(ax, estimator: StateEstimator, t_s: float, duration_s: float = 300.0):
+    storm_manager = getattr(getattr(estimator, "wind", None), "storm_manager", None)
+    if storm_manager is None or not getattr(estimator.config, "enable_storms", False):
+        return
+    active_storms = storm_manager.get_active_storms(float(t_s))
+    for idx, storm in enumerate(active_storms):
+        center = storm.center_at(float(t_s))
+        cx_km = float(center[0]) / 1000.0
+        cy_km = float(center[1]) / 1000.0
+        vx_km = float(storm.velocity_xy[0]) / 1000.0
+        vy_km = float(storm.velocity_xy[1]) / 1000.0
+        label = "Forecast moving storm" if idx == 0 else None
+        circle = plt.Circle(
+            (cx_km, cy_km),
+            float(storm.radius_m) / 1000.0,
+            facecolor="royalblue",
+            edgecolor="midnightblue",
+            linewidth=1.5,
+            alpha=0.16,
+            label=label,
+            zorder=4,
+        )
+        ax.add_patch(circle)
+        ax.annotate(
+            "",
+            xy=(cx_km + vx_km * duration_s, cy_km + vy_km * duration_s),
+            xytext=(cx_km, cy_km),
+            arrowprops=dict(arrowstyle="->", color="midnightblue", linestyle="--", linewidth=1.2, alpha=0.85),
+            zorder=6,
+        )
+        ax.text(
+            cx_km,
+            cy_km,
+            "Forecast\nstorm",
+            color="midnightblue",
+            fontsize=8,
+            ha="center",
+            va="center",
+            zorder=7,
+        )
+
+
 def _draw_executed_path(ax, result: TaskExecutionResult | None, *, color: str = "lime", label: str = "Executed trajectory") -> None:
     path = _path_array(result)
     if path is None:
@@ -152,13 +225,50 @@ def _draw_random_hazards(ax, disruptions: DisruptionLayerV25 | None, t_s: float)
     storm = disruptions.destructive_storm
     if storm.lifetime_s > 0.0:
         center = storm.center_at(t_s)
-        halo = plt.Circle((center[0] / 1000.0, center[1] / 1000.0), storm.halo_radius_m / 1000.0, color="purple", alpha=0.12, label="Random storm halo")
-        core = plt.Circle((center[0] / 1000.0, center[1] / 1000.0), storm.core_radius_m / 1000.0, color="crimson", alpha=0.25, label="Destructive core")
+        halo = plt.Circle(
+            (center[0] / 1000.0, center[1] / 1000.0),
+            storm.halo_radius_m / 1000.0,
+            facecolor="mediumpurple",
+            edgecolor="indigo",
+            linewidth=1.6,
+            alpha=0.18,
+            label="Random storm halo",
+            zorder=4,
+        )
+        core = plt.Circle(
+            (center[0] / 1000.0, center[1] / 1000.0),
+            storm.core_radius_m / 1000.0,
+            facecolor="crimson",
+            edgecolor="darkred",
+            linewidth=1.8,
+            alpha=0.34,
+            label="Destructive storm core",
+            zorder=5,
+        )
         ax.add_patch(halo)
         ax.add_patch(core)
+        ax.text(
+            center[0] / 1000.0,
+            center[1] / 1000.0,
+            "Random\nstorm",
+            color="indigo",
+            fontsize=8,
+            ha="center",
+            va="center",
+            zorder=7,
+        )
     for idx, region in enumerate(disruptions.local_wind_regions):
         label = "Random wind region" if idx == 0 else None
-        circle = plt.Circle((region.center_xy[0] / 1000.0, region.center_xy[1] / 1000.0), region.radius_m / 1000.0, color="cyan", alpha=0.10, label=label)
+        circle = plt.Circle(
+            (region.center_xy[0] / 1000.0, region.center_xy[1] / 1000.0),
+            region.radius_m / 1000.0,
+            facecolor="cyan",
+            edgecolor="deepskyblue",
+            linewidth=1.2,
+            alpha=0.18,
+            label=label,
+            zorder=4,
+        )
         ax.add_patch(circle)
 
 
@@ -196,6 +306,8 @@ def plot_mission_terrain_map(
         zorder=1,
     )
 
+    _draw_static_constraints(ax, estimator)
+    _draw_forecast_storms(ax, estimator, t_s)
     _draw_random_hazards(ax, disruptions, t_s)
     _draw_mission_annotations(ax, mission_map)
     _draw_executed_path(ax, result)
@@ -251,6 +363,8 @@ def plot_wind_map(
 
     if include_random_layer:
         _draw_random_hazards(ax, disruptions, t_s)
+    _draw_static_constraints(ax, estimator)
+    _draw_forecast_storms(ax, estimator, t_s)
     _draw_mission_annotations(ax, mission_map)
     if include_trajectory:
         _draw_executed_path(ax, result)
@@ -351,6 +465,103 @@ def generate_wind_trajectory_gif(
     speed = ax.contourf(X / 1000.0, Y / 1000.0, S, levels=20, cmap="viridis", alpha=0.58, zorder=2)
     fig.colorbar(speed, ax=ax, label="Wind speed (m/s)")
     quiver = ax.quiver(X / 1000.0, Y / 1000.0, U, V, color="white", alpha=0.80, scale=260, zorder=3)
+    _draw_static_constraints(ax, estimator)
+    forecast_storm_patches = []
+    forecast_storm_labels = []
+    forecast_storm_arrows = []
+    storm_manager = getattr(getattr(estimator, "wind", None), "storm_manager", None)
+    if storm_manager is not None and getattr(estimator.config, "enable_storms", False):
+        storm_count = int(max(0, getattr(estimator.config, "storm_count", 0)))
+        for idx in range(storm_count):
+            patch = plt.Circle(
+                (0.0, 0.0),
+                0.0,
+                facecolor="royalblue",
+                edgecolor="midnightblue",
+                linewidth=1.4,
+                alpha=0.16,
+                label="Forecast moving storm" if idx == 0 else None,
+                visible=False,
+                zorder=4,
+            )
+            ax.add_patch(patch)
+            label = ax.text(
+                0.0,
+                0.0,
+                "Forecast\nstorm",
+                color="midnightblue",
+                fontsize=8,
+                ha="center",
+                va="center",
+                visible=False,
+                zorder=7,
+            )
+            arrow = ax.annotate(
+                "",
+                xy=(0.0, 0.0),
+                xytext=(0.0, 0.0),
+                arrowprops=dict(arrowstyle="->", color="midnightblue", linestyle="--", linewidth=1.2, alpha=0.85),
+                visible=False,
+                zorder=6,
+            )
+            forecast_storm_patches.append(patch)
+            forecast_storm_labels.append(label)
+            forecast_storm_arrows.append(arrow)
+    random_hazard_patches = []
+    random_hazard_labels = []
+    if include_random_layer and disruptions is not None:
+        storm = disruptions.destructive_storm
+        halo_patch = plt.Circle(
+            (0.0, 0.0),
+            0.0,
+            facecolor="mediumpurple",
+            edgecolor="indigo",
+            linewidth=1.4,
+            alpha=0.18,
+            label="Random storm halo",
+            visible=False,
+            zorder=4,
+        )
+        core_patch = plt.Circle(
+            (0.0, 0.0),
+            0.0,
+            facecolor="crimson",
+            edgecolor="darkred",
+            linewidth=1.5,
+            alpha=0.34,
+            label="Destructive storm core",
+            visible=False,
+            zorder=5,
+        )
+        ax.add_patch(halo_patch)
+        ax.add_patch(core_patch)
+        storm_label = ax.text(
+            0.0,
+            0.0,
+            "Random\nstorm",
+            color="indigo",
+            fontsize=8,
+            ha="center",
+            va="center",
+            visible=False,
+            zorder=7,
+        )
+        random_hazard_patches.extend([halo_patch, core_patch])
+        random_hazard_labels.append(storm_label)
+        for idx, region in enumerate(disruptions.local_wind_regions):
+            patch = plt.Circle(
+                (region.center_xy[0] / 1000.0, region.center_xy[1] / 1000.0),
+                region.radius_m / 1000.0,
+                facecolor="cyan",
+                edgecolor="deepskyblue",
+                linewidth=1.1,
+                alpha=0.16,
+                label="Random wind region" if idx == 0 else None,
+                zorder=4,
+            )
+            ax.add_patch(patch)
+    if include_random_layer:
+        pass
     _draw_mission_annotations(ax, mission_map)
     line, = ax.plot([], [], color="lime", linewidth=2.8, label="Executed trajectory")
     dot, = ax.plot([], [], marker="o", color="white", markeredgecolor="black", markersize=8)
@@ -367,6 +578,51 @@ def generate_wind_trajectory_gif(
         t_s = total_time * frame_idx / max(frame_count - 1, 1)
         _, _, U_new, V_new, _ = _sample_wind_grid(bounds, sampler, t_s=t_s, grid_size=20)
         quiver.set_UVC(U_new, V_new)
+
+        if storm_manager is not None:
+            active_storms = storm_manager.get_active_storms(float(t_s))
+            for idx, patch in enumerate(forecast_storm_patches):
+                if idx < len(active_storms):
+                    storm = active_storms[idx]
+                    center = storm.center_at(float(t_s))
+                    cx_km = float(center[0]) / 1000.0
+                    cy_km = float(center[1]) / 1000.0
+                    vx_km = float(storm.velocity_xy[0]) / 1000.0
+                    vy_km = float(storm.velocity_xy[1]) / 1000.0
+                    patch.set_center((cx_km, cy_km))
+                    patch.set_radius(float(storm.radius_m) / 1000.0)
+                    patch.set_visible(True)
+                    forecast_storm_labels[idx].set_position((cx_km, cy_km))
+                    forecast_storm_labels[idx].set_visible(True)
+                    forecast_storm_arrows[idx].xy = (cx_km + vx_km * 300.0, cy_km + vy_km * 300.0)
+                    forecast_storm_arrows[idx].set_position((cx_km, cy_km))
+                    forecast_storm_arrows[idx].set_visible(True)
+                else:
+                    patch.set_visible(False)
+                    forecast_storm_labels[idx].set_visible(False)
+                    forecast_storm_arrows[idx].set_visible(False)
+
+        if include_random_layer and disruptions is not None and len(random_hazard_patches) >= 2:
+            storm = disruptions.destructive_storm
+            active = bool(storm.lifetime_s > 0.0 and storm.is_active(float(t_s)))
+            if active:
+                center = storm.center_at(float(t_s))
+                cx_km = float(center[0]) / 1000.0
+                cy_km = float(center[1]) / 1000.0
+                random_hazard_patches[0].set_center((cx_km, cy_km))
+                random_hazard_patches[0].set_radius(float(storm.halo_radius_m) / 1000.0)
+                random_hazard_patches[0].set_visible(True)
+                random_hazard_patches[1].set_center((cx_km, cy_km))
+                random_hazard_patches[1].set_radius(float(storm.core_radius_m) / 1000.0)
+                random_hazard_patches[1].set_visible(True)
+                if random_hazard_labels:
+                    random_hazard_labels[0].set_position((cx_km, cy_km))
+                    random_hazard_labels[0].set_visible(True)
+            else:
+                random_hazard_patches[0].set_visible(False)
+                random_hazard_patches[1].set_visible(False)
+                if random_hazard_labels:
+                    random_hazard_labels[0].set_visible(False)
 
         path_idx = min(len(path) - 1, int(math.ceil((len(path) - 1) * frame_idx / max(frame_count - 1, 1))))
         visible = path[: path_idx + 1]

@@ -232,10 +232,12 @@ class V30TaskSchedulerTests(unittest.TestCase):
         result = executor.execute(mission_map)
 
         self.assertTrue(result.success)
-        self.assertEqual(len(segment_executor.calls), 1)
-        self.assertEqual(result.total_time_s, 17.0)
-        self.assertEqual(result.total_energy_used_j, 500.0)
-        self.assertEqual(result.actual_path_xyz[-1], (100.0, 0.0, 120.0))
+        self.assertEqual(len(segment_executor.calls), 2)
+        self.assertTrue(result.returned_home)
+        self.assertEqual(result.total_time_s, 29.0)
+        self.assertEqual(result.total_energy_used_j, 1000.0)
+        self.assertEqual(result.final_position_xy, (0.0, 0.0))
+        self.assertEqual(result.actual_path_xyz[-1], (0.0, 0.0, 120.0))
 
     def test_astar_segment_executor_runs_short_leg(self):
         cfg = SimulationConfig()

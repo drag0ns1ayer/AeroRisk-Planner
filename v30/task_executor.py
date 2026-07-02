@@ -6,7 +6,7 @@ from typing import Protocol
 from configs.config import SimulationConfig
 from core.battery_manager import BatteryManager
 from v30.mission_map import MissionMap, Point2D
-from v30.task_scheduler import GreedyTaskScheduler, ScheduledTarget, SchedulerState
+from v30.task_scheduler import GreedyTaskScheduler, ScheduledTarget, SchedulerState, euclidean_distance_m
 
 
 @dataclass
@@ -25,6 +25,7 @@ class TaskExecutionResult:
     completed_inspections: list[str] = field(default_factory=list)
     skipped_inspections: list[str] = field(default_factory=list)
     charging_visits: int = 0
+    returned_home: bool = False
     total_time_s: float = 0.0
     total_energy_used_j: float = 0.0
     final_position_xy: Point2D = (0.0, 0.0)
@@ -71,11 +72,13 @@ class SimpleTaskExecutor:
         scheduler: GreedyTaskScheduler | None = None,
         battery_manager: BatteryManager | None = None,
         segment_executor: SegmentExecutor | None = None,
+        return_home: bool = True,
     ):
         self.config = config
         self.battery_manager = battery_manager or BatteryManager(config)
         self.scheduler = scheduler or GreedyTaskScheduler(config, battery_manager=self.battery_manager)
         self.segment_executor = segment_executor
+        self.return_home = bool(return_home)
 
     def execute(self, mission_map: MissionMap, max_steps: int = 200) -> TaskExecutionResult:
         state = SchedulerState(
@@ -93,8 +96,9 @@ class SimpleTaskExecutor:
         for _ in range(max_steps):
             target = self.scheduler.choose_next(mission_map, state)
             if target.kind == "finished":
-                result.success = True
-                result.failure_reason = None
+                if self._return_home_if_needed(mission_map, state, result):
+                    result.success = True
+                    result.failure_reason = None
                 break
             if target.kind == "failed" or target.xy is None:
                 result.failure_reason = target.reason
@@ -123,6 +127,57 @@ class SimpleTaskExecutor:
         result.final_position_xy = state.position_xy
         result.remaining_energy_j = float(state.remaining_energy_j)
         return result
+
+    def _return_home_if_needed(
+        self,
+        mission_map: MissionMap,
+        state: SchedulerState,
+        result: TaskExecutionResult,
+    ) -> bool:
+        if not self.return_home or mission_map.home_xy is None:
+            return True
+
+        home_xy = mission_map.home_xy
+        if euclidean_distance_m(state.position_xy, home_xy) <= 1.0:
+            result.returned_home = True
+            result.events.append(
+                TaskExecutionEvent(
+                    time_s=float(state.current_time_s),
+                    kind="return_home_done",
+                    target_id="home",
+                    position_xy=state.position_xy,
+                    remaining_energy_j=float(state.remaining_energy_j),
+                    detail="already at home",
+                )
+            )
+            return True
+
+        target = ScheduledTarget(
+            kind="return_home",
+            target_id="home",
+            xy=home_xy,
+            reason="return to home after all inspections",
+            estimated_energy_j=float(self.scheduler.energy_estimator(state.position_xy, home_xy)),
+            estimated_time_s=float(self.scheduler.time_estimator(state.position_xy, home_xy)),
+            service_time_s=0.0,
+        )
+        if not self._consume_travel(state, target, result):
+            if result.failure_reason is None:
+                result.failure_reason = "failed to return home"
+            return False
+
+        result.returned_home = True
+        result.events.append(
+            TaskExecutionEvent(
+                time_s=float(state.current_time_s),
+                kind="return_home_done",
+                target_id="home",
+                position_xy=state.position_xy,
+                remaining_energy_j=float(state.remaining_energy_j),
+                detail="mission closed at home",
+            )
+        )
+        return True
 
     def _consume_travel(
         self,

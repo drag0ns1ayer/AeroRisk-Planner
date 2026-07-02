@@ -9,7 +9,7 @@ from core.battery_manager import BatteryManager
 from v30.mission_map import ChargingStation, InspectionPoint, MissionMap, Point2D
 
 
-TargetKind = Literal["inspection", "charging", "finished", "failed"]
+TargetKind = Literal["inspection", "charging", "return_home", "finished", "failed"]
 
 
 @dataclass
