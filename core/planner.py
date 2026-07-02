@@ -268,7 +268,7 @@ class AStarPlanner:
                             parent=current_node
                         ))
 
-        print("❌ 4D 搜索失败：步数耗尽，未找到安全通行路径。")
+        print("4D search failed: step budget exhausted; no safe path found.")
         return None
 
     def _reconstruct_path(self, node: Node) -> List[Tuple[float, float, float]]:

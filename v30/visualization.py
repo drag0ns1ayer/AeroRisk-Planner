@@ -37,6 +37,21 @@ def _local_bounds(mission_map: MissionMap, result: TaskExecutionResult | None = 
     return min(xs) - padding_m, max(xs) + padding_m, min(ys) - padding_m, max(ys) + padding_m
 
 
+def _map_bounds(estimator: StateEstimator):
+    return tuple(float(v) for v in estimator.get_bounds())
+
+
+def _path_array(result: TaskExecutionResult | None) -> np.ndarray | None:
+    if result is None or len(result.actual_path_xyz) < 2:
+        return None
+    path = np.asarray(result.actual_path_xyz, dtype=float)
+    valid = np.isfinite(path).all(axis=1)
+    path = path[valid]
+    if len(path) < 2:
+        return None
+    return path
+
+
 def _predictable_wind_sampler(estimator: StateEstimator) -> WindSampler:
     def sample(x: float, y: float, t_s: float) -> np.ndarray:
         z = estimator.get_altitude(x, y) + 50.0
@@ -76,6 +91,40 @@ def _sample_wind_grid(bounds, wind_sampler: WindSampler, t_s: float, grid_size: 
     return X, Y, U, V, S
 
 
+def _draw_terrain_background(ax, estimator: StateEstimator, bounds):
+    terrain = estimator.map
+    min_x, max_x, min_y, max_y = bounds
+    X = np.asarray(terrain.X, dtype=float)
+    Y = np.asarray(terrain.Y, dtype=float)
+    dem = np.asarray(terrain.dem, dtype=float)
+    mask = (X >= min_x) & (X <= max_x) & (Y >= min_y) & (Y <= max_y)
+    if not np.any(mask):
+        return
+
+    terrain_layer = ax.contourf(
+        X / 1000.0,
+        Y / 1000.0,
+        dem,
+        levels=42,
+        cmap="gist_earth",
+        alpha=0.55,
+        zorder=0,
+    )
+    ax.contour(
+        X / 1000.0,
+        Y / 1000.0,
+        dem,
+        levels=12,
+        colors="black",
+        linewidths=0.25,
+        alpha=0.20,
+        zorder=1,
+    )
+    ax.set_xlim(min_x / 1000.0, max_x / 1000.0)
+    ax.set_ylim(min_y / 1000.0, max_y / 1000.0)
+    return terrain_layer
+
+
 def _draw_mission_annotations(ax, mission_map: MissionMap):
     ax.scatter(mission_map.start_xy[0] / 1000.0, mission_map.start_xy[1] / 1000.0, c="gold", s=130, marker="*", edgecolors="black", label="Start", zorder=5)
     if mission_map.home_xy is not None:
@@ -87,6 +136,14 @@ def _draw_mission_annotations(ax, mission_map: MissionMap):
     for idx, station in enumerate(mission_map.charging_stations):
         label = "Charging" if idx == 0 else None
         ax.scatter(station.xy[0] / 1000.0, station.xy[1] / 1000.0, c="tab:blue", s=80, marker="P", edgecolors="black", label=label, zorder=5)
+
+
+def _draw_executed_path(ax, result: TaskExecutionResult | None, *, color: str = "lime", label: str = "Executed trajectory") -> None:
+    path = _path_array(result)
+    if path is None:
+        return
+    ax.plot(path[:, 0] / 1000.0, path[:, 1] / 1000.0, color=color, linewidth=3.0, label=label, zorder=6)
+    ax.scatter(path[-1, 0] / 1000.0, path[-1, 1] / 1000.0, color=color, edgecolors="black", s=45, zorder=7)
 
 
 def _draw_random_hazards(ax, disruptions: DisruptionLayerV25 | None, t_s: float):
@@ -105,6 +162,59 @@ def _draw_random_hazards(ax, disruptions: DisruptionLayerV25 | None, t_s: float)
         ax.add_patch(circle)
 
 
+def plot_mission_terrain_map(
+    *,
+    estimator: StateEstimator,
+    mission_map: MissionMap,
+    output_path: str | Path,
+    result: TaskExecutionResult | None = None,
+    disruptions: DisruptionLayerV25 | None = None,
+    title: str = "V3.0 Task Mission on Bernese Terrain",
+    full_map: bool = True,
+    t_s: float = 0.0,
+) -> None:
+    bounds = _map_bounds(estimator) if full_map else _local_bounds(mission_map, result)
+    fig, ax = plt.subplots(figsize=(11, 9))
+    terrain = ax.contourf(
+        estimator.map.X / 1000.0,
+        estimator.map.Y / 1000.0,
+        estimator.map.dem,
+        levels=58,
+        cmap="gist_earth",
+        alpha=0.86,
+        zorder=0,
+    )
+    fig.colorbar(terrain, ax=ax, pad=0.02, label="Altitude (m)")
+    ax.contour(
+        estimator.map.X / 1000.0,
+        estimator.map.Y / 1000.0,
+        estimator.map.dem,
+        levels=18,
+        colors="black",
+        linewidths=0.22,
+        alpha=0.22,
+        zorder=1,
+    )
+
+    _draw_random_hazards(ax, disruptions, t_s)
+    _draw_mission_annotations(ax, mission_map)
+    _draw_executed_path(ax, result)
+
+    min_x, max_x, min_y, max_y = bounds
+    ax.set_xlim(min_x / 1000.0, max_x / 1000.0)
+    ax.set_ylim(min_y / 1000.0, max_y / 1000.0)
+    ax.set_title(title, fontsize=15, fontweight="bold")
+    ax.set_xlabel("X (km)")
+    ax.set_ylabel("Y (km)")
+    ax.grid(True, alpha=0.22)
+    ax.legend(loc="upper left", fontsize=9)
+    fig.tight_layout()
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=260, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_wind_map(
     *,
     estimator: StateEstimator,
@@ -116,22 +226,34 @@ def plot_wind_map(
     include_trajectory: bool = False,
     title: str = "Wind Field",
     t_s: float = 0.0,
+    full_map: bool = False,
 ) -> None:
-    bounds = _local_bounds(mission_map, result)
+    bounds = _map_bounds(estimator) if full_map else _local_bounds(mission_map, result)
     sampler = _combined_wind_sampler(estimator, disruptions) if include_random_layer else _predictable_wind_sampler(estimator)
-    X, Y, U, V, S = _sample_wind_grid(bounds, sampler, t_s=t_s)
+    X, Y, U, V, S = _sample_wind_grid(bounds, sampler, t_s=t_s, grid_size=34 if full_map else 24)
 
     fig, ax = plt.subplots(figsize=(10, 8))
-    speed = ax.contourf(X / 1000.0, Y / 1000.0, S, levels=20, cmap="viridis", alpha=0.82)
+    if not full_map:
+        _draw_terrain_background(ax, estimator, bounds)
+    speed = ax.contourf(X / 1000.0, Y / 1000.0, S, levels=24, cmap="turbo", alpha=0.78, zorder=2)
     fig.colorbar(speed, ax=ax, label="Wind speed (m/s)")
-    ax.quiver(X / 1000.0, Y / 1000.0, U, V, color="white", alpha=0.75, scale=260)
+    ax.streamplot(
+        X / 1000.0,
+        Y / 1000.0,
+        U,
+        V,
+        density=1.05,
+        color="white",
+        linewidth=0.85,
+        arrowsize=1.1,
+        zorder=3,
+    )
 
     if include_random_layer:
         _draw_random_hazards(ax, disruptions, t_s)
     _draw_mission_annotations(ax, mission_map)
-    if include_trajectory and result is not None and len(result.actual_path_xyz) >= 2:
-        arr = np.asarray(result.actual_path_xyz, dtype=float)
-        ax.plot(arr[:, 0] / 1000.0, arr[:, 1] / 1000.0, color="lime", linewidth=2.8, label="Executed trajectory", zorder=4)
+    if include_trajectory:
+        _draw_executed_path(ax, result)
 
     ax.set_title(title)
     ax.set_xlabel("X (km)")
@@ -142,6 +264,67 @@ def plot_wind_map(
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=220)
+    plt.close(fig)
+
+
+def plot_mission_elevation_profile(
+    *,
+    estimator: StateEstimator,
+    mission_map: MissionMap,
+    result: TaskExecutionResult,
+    output_path: str | Path,
+    title: str = "V3.0 Task Mission Elevation Profile",
+) -> None:
+    path = _path_array(result)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    if path is None:
+        ax.text(0.5, 0.5, "No trajectory data available", ha="center", va="center", transform=ax.transAxes)
+    else:
+        dx = np.diff(path[:, 0])
+        dy = np.diff(path[:, 1])
+        dist = np.concatenate([[0.0], np.cumsum(np.hypot(dx, dy))])
+        total_dist = max(float(dist[-1]), 1.0)
+        total_time = max(float(result.total_time_s), 1.0)
+        times = dist / total_dist * total_time
+        terrain_z = np.asarray([estimator.map.get_altitude(float(x), float(y)) for x, y in path[:, :2]], dtype=float)
+        flight_z = path[:, 2].copy()
+        invalid_z = flight_z <= 0.0
+        flight_z[invalid_z] = terrain_z[invalid_z] + float(estimator.config.takeoff_altitude_agl)
+
+        ax.fill_between(times, 0.0, terrain_z, color="gray", alpha=0.35, label="Terrain under route")
+        ax.plot(times, flight_z, color="lime", linewidth=3.0, label="Executed altitude")
+        ax.plot(
+            times,
+            terrain_z + float(estimator.config.takeoff_altitude_agl),
+            color="crimson",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.75,
+            label=f"+{estimator.config.takeoff_altitude_agl:.0f}m AGL clearance",
+        )
+        for event in result.events:
+            if event.kind in {"inspection_done", "charging_done"}:
+                ax.axvline(float(event.time_s), color="black", alpha=0.18, linewidth=0.8)
+                ax.text(
+                    float(event.time_s),
+                    max(flight_z) + 40.0,
+                    str(event.target_id),
+                    rotation=90,
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    alpha=0.75,
+                )
+
+    ax.set_title(title, fontsize=15, fontweight="bold")
+    ax.set_xlabel("Mission time (s)")
+    ax.set_ylabel("Absolute altitude (m)")
+    ax.grid(True, linestyle=":", alpha=0.55)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=3)
+    fig.tight_layout()
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=260, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -164,9 +347,10 @@ def generate_wind_trajectory_gif(
 
     fig, ax = plt.subplots(figsize=(10, 8))
     X, Y, U, V, S = _sample_wind_grid(bounds, sampler, t_s=0.0, grid_size=20)
-    speed = ax.contourf(X / 1000.0, Y / 1000.0, S, levels=20, cmap="viridis", alpha=0.82)
+    _draw_terrain_background(ax, estimator, bounds)
+    speed = ax.contourf(X / 1000.0, Y / 1000.0, S, levels=20, cmap="viridis", alpha=0.58, zorder=2)
     fig.colorbar(speed, ax=ax, label="Wind speed (m/s)")
-    quiver = ax.quiver(X / 1000.0, Y / 1000.0, U, V, color="white", alpha=0.75, scale=260)
+    quiver = ax.quiver(X / 1000.0, Y / 1000.0, U, V, color="white", alpha=0.80, scale=260, zorder=3)
     _draw_mission_annotations(ax, mission_map)
     line, = ax.plot([], [], color="lime", linewidth=2.8, label="Executed trajectory")
     dot, = ax.plot([], [], marker="o", color="white", markeredgecolor="black", markersize=8)

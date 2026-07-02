@@ -1,0 +1,75 @@
+{
+  "name": "v30_showcase_bernese_valley_chain",
+  "start_xy": [-7800.0, -7800.0],
+  "home_xy": [-7800.0, -7800.0],
+  "inspection_points": [
+    {
+      "id": "south-valley-entry",
+      "xy": [-6200.0, -5600.0],
+      "priority": 8.0,
+      "service_time_s": 25.0,
+      "risk_value": 0.08,
+      "altitude_agl_m": null,
+      "deadline_s": 650.0,
+      "status": "pending"
+    },
+    {
+      "id": "valley-substation",
+      "xy": [-4600.0, -3600.0],
+      "priority": 7.0,
+      "service_time_s": 35.0,
+      "risk_value": 0.14,
+      "altitude_agl_m": null,
+      "deadline_s": 1000.0,
+      "status": "pending"
+    },
+    {
+      "id": "west-maintenance-pad",
+      "xy": [-3000.0, -1700.0],
+      "priority": 6.0,
+      "service_time_s": 35.0,
+      "risk_value": 0.12,
+      "altitude_agl_m": null,
+      "deadline_s": 1350.0,
+      "status": "pending"
+    },
+    {
+      "id": "central-ridge-relay",
+      "xy": [-1200.0, 200.0],
+      "priority": 5.0,
+      "service_time_s": 45.0,
+      "risk_value": 0.25,
+      "altitude_agl_m": null,
+      "deadline_s": null,
+      "status": "pending"
+    },
+    {
+      "id": "central-pass-sensor",
+      "xy": [-300.0, 950.0],
+      "priority": 4.0,
+      "service_time_s": 45.0,
+      "risk_value": 0.30,
+      "altitude_agl_m": null,
+      "deadline_s": null,
+      "status": "pending"
+    }
+  ],
+  "charging_stations": [
+    {
+      "id": "charge-valley-west",
+      "xy": [-3300.0, -2100.0],
+      "charge_rate_j_per_s": 4500.0,
+      "docking_time_s": 25.0,
+      "target_soc": 0.95,
+      "available": true
+    },
+    {
+      "id": "charge-central-pass",
+      "xy": [450.0, 1450.0],
+      "charge_rate_j_per_s": 4200.0,
+      "docking_time_s": 25.0,
+      "target_soc": 0.95,
+      "available": true
+    }
+  ]
+}

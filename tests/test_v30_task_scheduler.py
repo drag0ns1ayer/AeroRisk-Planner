@@ -9,7 +9,7 @@ from environment.map_manager import MapManager
 from environment.wind_models import WindModelFactory
 from v30.experiments.run_task_map_demo import offset_mission_map
 from v30.mission_map import ChargingStation, InspectionPoint, InspectionStatus, MissionMap
-from v30.segment_executor import AStarSegmentExecutor
+from v30.segment_executor import AStarSegmentExecutor, V25GuidedSegmentExecutor
 from v30.task_executor import SegmentExecutionResult, SimpleTaskExecutor
 from v30.task_scheduler import GreedyTaskScheduler, SchedulerState, TaskSchedulerWeights
 
@@ -54,6 +54,13 @@ class V30TaskSchedulerTests(unittest.TestCase):
         self.assertGreaterEqual(len(mission_map.inspection_points), 1)
         self.assertGreaterEqual(len(mission_map.charging_stations), 1)
         self.assertTrue(all(point.is_pending for point in mission_map.inspection_points))
+
+    def test_mission_map_showcase_loads(self):
+        mission_map = MissionMap.load_json("v30/examples/mission_map_showcase.json")
+
+        self.assertGreaterEqual(len(mission_map.inspection_points), 3)
+        self.assertGreaterEqual(len(mission_map.charging_stations), 1)
+        self.assertNotEqual(mission_map.start_xy, (0.0, 0.0))
 
     def test_offset_mission_map_treats_coordinates_as_relative(self):
         mission_map = MissionMap(
@@ -258,6 +265,30 @@ class V30TaskSchedulerTests(unittest.TestCase):
         )
 
         self.assertTrue(result.success, result.failure_reason)
+
+    def test_v25_guided_segment_executor_runs_short_astar_leg(self):
+        cfg = SimulationConfig()
+        cfg.max_mission_time_s = 120.0
+        cfg.rl_max_steps = 80
+        cfg.v25_stress_level = "normal"
+        cfg.battery_capacity_j = 500_000.0
+
+        map_manager = MapManager(cfg)
+        min_x, _, min_y, _ = map_manager.get_bounds()
+        start_xy = (float(min_x + 100.0), float(min_y + 100.0))
+        goal_xy = (float(min_x + 250.0), float(min_y + 250.0))
+        segment_executor = V25GuidedSegmentExecutor(cfg, mode="astar", enable_apas=True, seed=11)
+
+        result = segment_executor.execute_leg(
+            start_xy=start_xy,
+            goal_xy=goal_xy,
+            start_time_s=0.0,
+            remaining_energy_j=cfg.battery_capacity_j,
+        )
+
+        self.assertTrue(result.success, result.failure_reason)
+        self.assertGreater(len(result.path_xyz), 1)
+        self.assertLess(result.remaining_energy_j, cfg.battery_capacity_j)
         self.assertGreaterEqual(result.elapsed_time_s, 0.0)
         self.assertLessEqual(result.remaining_energy_j, cfg.battery_capacity_j)
         self.assertGreaterEqual(len(result.path_xyz), 2)

@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import io
+import json
 from pathlib import Path
 
 # 确保项目根目录在环境变量中
@@ -34,6 +35,17 @@ from simulation.mission_executor import MissionExecutor
 from simulation.swarm_mission_executor import SwarmMissionExecutor
 from utils.animation_builder import MissionAnimator
 from utils.visualizer_core import Visualizer
+from v25.disruptions import build_disruption_layer_v25
+from v30.experiments.run_task_map_demo import build_real_astar_segment_executor
+from v30.mission_map import ChargingStation, InspectionPoint, MissionMap
+from v30.segment_executor import V25GuidedSegmentExecutor
+from v30.task_executor import SimpleTaskExecutor
+from v30.visualization import (
+    generate_wind_trajectory_gif,
+    plot_mission_elevation_profile,
+    plot_mission_terrain_map,
+    plot_wind_map,
+)
 
 try:
     from stable_baselines3 import PPO
@@ -41,7 +53,7 @@ except ImportError:
     PPO = None
 
 RESULTS_ROOT = Path(project_root) / "results"
-DEFAULT_MODEL_PATH = Path(project_root) / "models" / "ppo_drone_stage3_obs31_run1_best" / "best_model.zip"
+DEFAULT_MODEL_PATH = Path(project_root) / "v25" / "artifacts" / "models" / "ppo_v25_expert_bc_s200_ft50k_best" / "best_model.zip"
 
 
 @st.cache_resource(show_spinner=False)
@@ -469,6 +481,229 @@ def apply_ui_config(ui_state: dict, disturbance_enabled: bool = False) -> Simula
     return config
 
 
+def create_v30_mission_preview(map_manager: MapManager, mission_map: MissionMap, nfz_list_km=None):
+    fig = create_terrain_preview(map_manager, nfz_list_km=nfz_list_km)
+    fig.add_trace(go.Scatter(
+        x=[mission_map.start_xy[0]],
+        y=[mission_map.start_xy[1]],
+        mode="markers+text",
+        text=["Start"],
+        textposition="top center",
+        marker=dict(size=16, color="yellow", symbol="star", line=dict(width=2, color="black")),
+        name="Start",
+    ))
+    if mission_map.home_xy is not None:
+        fig.add_trace(go.Scatter(
+            x=[mission_map.home_xy[0]],
+            y=[mission_map.home_xy[1]],
+            mode="markers+text",
+            text=["Home"],
+            textposition="bottom center",
+            marker=dict(size=13, color="white", symbol="hexagon", line=dict(width=2, color="black")),
+            name="Home",
+        ))
+    if mission_map.inspection_points:
+        fig.add_trace(go.Scatter(
+            x=[p.xy[0] for p in mission_map.inspection_points],
+            y=[p.xy[1] for p in mission_map.inspection_points],
+            mode="markers+text",
+            text=[p.id for p in mission_map.inspection_points],
+            textposition="top center",
+            marker=dict(size=12, color="orange", symbol="circle", line=dict(width=1, color="black")),
+            name="Inspection",
+        ))
+    if mission_map.charging_stations:
+        fig.add_trace(go.Scatter(
+            x=[c.xy[0] for c in mission_map.charging_stations],
+            y=[c.xy[1] for c in mission_map.charging_stations],
+            mode="markers+text",
+            text=[c.id for c in mission_map.charging_stations],
+            textposition="bottom center",
+            marker=dict(size=13, color="dodgerblue", symbol="cross", line=dict(width=1, color="black")),
+            name="Charging",
+        ))
+    fig.update_layout(title="V3.0 地图巡检任务标定预览")
+    return fig
+
+
+def _float_cell(value, default: float = 0.0) -> float:
+    if value is None or pd.isna(value):
+        return float(default)
+    if isinstance(value, str) and not value.strip():
+        return float(default)
+    return float(value)
+
+
+def _optional_float_cell(value):
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return float(value)
+
+
+def build_v30_mission_map_from_ui(start_xy, home_xy, inspections_df, chargers_df) -> MissionMap:
+    inspection_points = []
+    for _, row in inspections_df.iterrows():
+        if not bool(row.get("enabled", True)):
+            continue
+        point_id = str(row.get("id", "")).strip()
+        if not point_id:
+            continue
+        inspection_points.append(InspectionPoint(
+            id=point_id,
+            xy=(_float_cell(row.get("x_m", 0.0)), _float_cell(row.get("y_m", 0.0))),
+            priority=_float_cell(row.get("priority", 1.0), 1.0),
+            service_time_s=_float_cell(row.get("service_time_s", 30.0), 30.0),
+            risk_value=_float_cell(row.get("risk_value", 0.0), 0.0),
+            deadline_s=_optional_float_cell(row.get("deadline_s", None)),
+        ))
+
+    charging_stations = []
+    for _, row in chargers_df.iterrows():
+        if not bool(row.get("available", True)):
+            continue
+        station_id = str(row.get("id", "")).strip()
+        if not station_id:
+            continue
+        charging_stations.append(ChargingStation(
+            id=station_id,
+            xy=(_float_cell(row.get("x_m", 0.0)), _float_cell(row.get("y_m", 0.0))),
+            charge_rate_j_per_s=_float_cell(row.get("charge_rate_j_per_s", 4000.0), 4000.0),
+            docking_time_s=_float_cell(row.get("docking_time_s", 25.0), 25.0),
+            target_soc=_float_cell(row.get("target_soc", 0.95), 0.95),
+            available=True,
+        ))
+
+    return MissionMap(
+        name="ui_v30_inspection_mission",
+        start_xy=(float(start_xy[0]), float(start_xy[1])),
+        home_xy=(float(home_xy[0]), float(home_xy[1])),
+        inspection_points=inspection_points,
+        charging_stations=charging_stations,
+    )
+
+
+def _v30_route_end_xy(mission_map: MissionMap):
+    if mission_map.inspection_points:
+        return mission_map.inspection_points[-1].xy
+    if mission_map.home_xy is not None:
+        return mission_map.home_xy
+    return mission_map.start_xy
+
+
+def run_v30_inspection_case(
+    ui_state: dict,
+    mission_map: MissionMap,
+    control_mode: str,
+    rl_model,
+    output_dir: Path,
+):
+    config = apply_ui_config(ui_state, disturbance_enabled=False)
+    config.max_replans = int(ui_state.get("v30_max_replans", config.max_replans))
+    config.max_mission_time_s = float(ui_state.get("v30_max_mission_time_s", config.max_mission_time_s))
+    config.mission_update_interval_s = float(ui_state.get("v30_update_interval_s", config.mission_update_interval_s))
+    config.v25_stress_level = str(ui_state.get("v30_stress", "fragile"))
+    config.rl_enable_apas = bool(ui_state.get("v30_enable_apas", True))
+
+    base_segment_executor, _ = build_real_astar_segment_executor(config)
+    estimator = base_segment_executor.estimator
+    segment_executor = base_segment_executor
+    if control_mode.startswith("v25_"):
+        v25_mode = control_mode.replace("v25_", "")
+        model = rl_model if v25_mode == "rl" else None
+        if v25_mode == "rl" and model is None:
+            raise ValueError("选择 v25_rl 时需要先加载 PPO 模型。")
+        segment_executor = V25GuidedSegmentExecutor(
+            config=config,
+            mode=v25_mode,
+            model=model,
+            enable_apas=bool(ui_state.get("v30_enable_apas", True)),
+            seed=int(config.wind_seed),
+        )
+
+    disruptions = build_disruption_layer_v25(
+        mission_map.start_xy,
+        _v30_route_end_xy(mission_map),
+        config=config,
+        seed=int(config.wind_seed),
+    )
+    executor = SimpleTaskExecutor(config, segment_executor=segment_executor)
+    result = executor.execute(mission_map)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    mission_map.save_json(output_dir / "mission_map.json")
+    summary = {
+        "success": result.success,
+        "completed_inspections": result.completed_inspections,
+        "charging_visits": result.charging_visits,
+        "total_time_s": result.total_time_s,
+        "total_energy_used_j": result.total_energy_used_j,
+        "remaining_energy_j": result.remaining_energy_j,
+        "failure_reason": result.failure_reason,
+        "path_points": len(result.actual_path_xyz),
+        "control_mode": control_mode,
+        "apas_enabled": bool(ui_state.get("v30_enable_apas", True)) if control_mode.startswith("v25_") else False,
+        "map_loaded_from_file": bool(getattr(estimator.map, "map_loaded_from_file", False)),
+        "map_source_path": str(getattr(estimator.map, "map_source_path", "")),
+    }
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    plot_mission_terrain_map(
+        estimator=estimator,
+        mission_map=mission_map,
+        result=result,
+        disruptions=disruptions,
+        output_path=output_dir / "mission_terrain_trajectory.png",
+        full_map=True,
+    )
+    plot_mission_terrain_map(
+        estimator=estimator,
+        mission_map=mission_map,
+        result=result,
+        disruptions=disruptions,
+        output_path=output_dir / "mission_terrain_zoom.png",
+        title="V3.0 Task Mission Detail View",
+        full_map=False,
+    )
+    plot_wind_map(
+        estimator=estimator,
+        mission_map=mission_map,
+        result=result,
+        output_path=output_dir / "observable_wind_trajectory.png",
+        include_random_layer=False,
+        include_trajectory=True,
+        full_map=True,
+        title="Trajectory on Observable / Predictable Wind Field",
+    )
+    plot_wind_map(
+        estimator=estimator,
+        mission_map=mission_map,
+        result=result,
+        disruptions=disruptions,
+        output_path=output_dir / "true_wind_trajectory.png",
+        include_random_layer=True,
+        include_trajectory=True,
+        full_map=True,
+        title="Trajectory on Observable + Random Layer Wind Field",
+    )
+    plot_mission_elevation_profile(
+        estimator=estimator,
+        mission_map=mission_map,
+        result=result,
+        output_path=output_dir / "mission_elevation_profile.png",
+    )
+    generate_wind_trajectory_gif(
+        estimator=estimator,
+        mission_map=mission_map,
+        result=result,
+        disruptions=disruptions,
+        output_path=output_dir / "true_wind_trajectory.gif",
+        frames=int(ui_state.get("v30_gif_frames", 20)),
+    )
+    return summary
+
+
 def run_mission_case(case_name: str, mode_name: str, disturbance_enabled: bool, ui_state: dict, rl_model, output_dir: Path):
     """运行测评单个案例（支持单机与编队）"""
     config = apply_ui_config(ui_state, disturbance_enabled)
@@ -835,7 +1070,7 @@ def main():
     # 主体界面 Tabs
     # ==========================
     preview_map = env_map
-    tab_matrix, tab_artifacts = st.tabs(["🚀 任务推演大厅", "📂 历史成果画廊"])
+    tab_matrix, tab_v30, tab_artifacts = st.tabs(["🚀 任务推演大厅", "V3.0 地图巡检模式", "📂 历史成果画廊"])
 
     with tab_matrix:
         col_m1, col_m2 = st.columns([1.5, 1])
@@ -898,6 +1133,162 @@ def main():
             for row in matrix_results:
                 with st.expander(f"📍 {row['场景']} | 算法: {row['控制算法']} | 环境: {row['微观扰动']}"):
                     display_artifacts(Path(row["output_dir"]), gif_name=f"{row['场景']}.gif")
+
+    with tab_v30:
+        st.write("### V3.0 地图巡检任务")
+        st.caption("在已确认的地形/风场环境上标定起点、巡检点和充电点，并选择 A* / Expert / RL 执行栈。")
+
+        half_m_v30 = float((map_size_km_locked * 1000.0) / 2.0)
+        showcase_path = Path(project_root) / "v30" / "examples" / "mission_map_showcase.json"
+        default_showcase = MissionMap.load_json(showcase_path)
+
+        preset_choice = st.selectbox(
+            "任务模板",
+            ["展示级 Bernese 山地巡检", "空白自定义"],
+            index=0,
+            help="展示级模板使用全图坐标；空白自定义适合从当前起终点快速开始。",
+        )
+        if preset_choice == "展示级 Bernese 山地巡检":
+            base_mission = default_showcase
+        else:
+            base_mission = MissionMap(
+                name="ui_blank_inspection",
+                start_xy=(float(start_x), float(start_y)),
+                home_xy=(float(start_x), float(start_y)),
+                inspection_points=[InspectionPoint(id="inspection-1", xy=(float(goal_x), float(goal_y)), priority=1.0)],
+                charging_stations=[ChargingStation(id="charge-1", xy=(float(start_x), float(start_y)))],
+            )
+
+        col_v30_a, col_v30_b = st.columns([1.15, 1.0])
+        with col_v30_a:
+            st.write("#### 起点 / 归航点")
+            c_start_1, c_start_2 = st.columns(2)
+            v30_start_x = c_start_1.number_input("Start X (m)", -half_m_v30, half_m_v30, float(base_mission.start_xy[0]), 100.0)
+            v30_start_y = c_start_2.number_input("Start Y (m)", -half_m_v30, half_m_v30, float(base_mission.start_xy[1]), 100.0)
+            home_default = base_mission.home_xy or base_mission.start_xy
+            c_home_1, c_home_2 = st.columns(2)
+            v30_home_x = c_home_1.number_input("Home X (m)", -half_m_v30, half_m_v30, float(home_default[0]), 100.0)
+            v30_home_y = c_home_2.number_input("Home Y (m)", -half_m_v30, half_m_v30, float(home_default[1]), 100.0)
+
+        with col_v30_b:
+            st.write("#### 执行方案")
+            control_label = st.selectbox(
+                "控制 / 执行栈",
+                [
+                    "legacy_astar：传统 A* 分段执行",
+                    "v25_astar：A* + APAS + waypoint-skip",
+                    "v25_expert：Expert + APAS + waypoint-skip",
+                    "v25_rl：PPO RL + APAS + waypoint-skip",
+                ],
+                index=0,
+            )
+            control_mode = control_label.split("：", 1)[0]
+            v30_enable_apas = st.checkbox("v2.5 模式启用 APAS 安全盾", value=True)
+            v30_stress = st.selectbox("随机层压力等级", ["normal", "hard", "extreme", "fragile"], index=3)
+            v30_max_replans = st.number_input("每段最大 replan 次数", min_value=1, max_value=200, value=35, step=5)
+            v30_max_mission_time_s = st.number_input("最大任务时间 (s)", min_value=300.0, max_value=20000.0, value=3600.0, step=300.0)
+            v30_update_interval_s = st.number_input("任务推进步长 / 重规划间隔 (s)", min_value=10.0, max_value=300.0, value=60.0, step=10.0)
+            v30_gif_frames = st.slider("GIF 帧数", 6, 80, 20, 2)
+
+        st.write("#### 巡检点标定")
+        inspections_default = pd.DataFrame([
+            {
+                "enabled": True,
+                "id": p.id,
+                "x_m": float(p.xy[0]),
+                "y_m": float(p.xy[1]),
+                "priority": float(p.priority),
+                "service_time_s": float(p.service_time_s),
+                "risk_value": float(p.risk_value),
+                "deadline_s": np.nan if p.deadline_s is None else float(p.deadline_s),
+            }
+            for p in base_mission.inspection_points
+        ])
+        inspections_df = st.data_editor(
+            inspections_default,
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"v30_inspections_{preset_choice}",
+        )
+
+        st.write("#### 充电点标定")
+        chargers_default = pd.DataFrame([
+            {
+                "available": bool(c.available),
+                "id": c.id,
+                "x_m": float(c.xy[0]),
+                "y_m": float(c.xy[1]),
+                "charge_rate_j_per_s": float(c.charge_rate_j_per_s),
+                "docking_time_s": float(c.docking_time_s),
+                "target_soc": float(c.target_soc),
+            }
+            for c in base_mission.charging_stations
+        ])
+        chargers_df = st.data_editor(
+            chargers_default,
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"v30_chargers_{preset_choice}",
+        )
+
+        mission_map_v30 = build_v30_mission_map_from_ui(
+            start_xy=(v30_start_x, v30_start_y),
+            home_xy=(v30_home_x, v30_home_y),
+            inspections_df=inspections_df,
+            chargers_df=chargers_df,
+        )
+
+        st.plotly_chart(
+            create_v30_mission_preview(env_map, mission_map_v30, env_state.get("nfz_list_km", [])),
+            use_container_width=True,
+        )
+
+        if st.button("运行 V3.0 地图巡检任务", type="primary", use_container_width=True):
+            v30_ui_state = {
+                **ui_state,
+                "v30_max_replans": int(v30_max_replans),
+                "v30_max_mission_time_s": float(v30_max_mission_time_s),
+                "v30_update_interval_s": float(v30_update_interval_s),
+                "v30_enable_apas": bool(v30_enable_apas),
+                "v30_stress": str(v30_stress),
+                "v30_gif_frames": int(v30_gif_frames),
+            }
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            output_dir = RESULTS_ROOT / f"ui_v30_inspection_{control_mode}_{timestamp}"
+            try:
+                with st.spinner("正在执行 V3.0 地图巡检并渲染结果图..."):
+                    summary = run_v30_inspection_case(
+                        ui_state=v30_ui_state,
+                        mission_map=mission_map_v30,
+                        control_mode=control_mode,
+                        rl_model=rl_model,
+                        output_dir=output_dir,
+                    )
+                st.session_state["v30_last_result"] = {"summary": summary, "output_dir": str(output_dir)}
+                st.success("V3.0 地图巡检任务完成")
+            except Exception as exc:
+                st.error(f"V3.0 地图巡检任务失败：{exc}")
+
+        v30_last = st.session_state.get("v30_last_result")
+        if v30_last:
+            out_dir = Path(v30_last["output_dir"])
+            summary = v30_last["summary"]
+            st.write("### V3.0 结果摘要")
+            st.json(summary)
+            for image_name in [
+                "mission_terrain_trajectory.png",
+                "mission_terrain_zoom.png",
+                "true_wind_trajectory.png",
+                "observable_wind_trajectory.png",
+                "mission_elevation_profile.png",
+            ]:
+                image_path = out_dir / image_name
+                if image_path.exists():
+                    st.image(str(image_path), caption=image_name, use_container_width=True)
+            gif_path = out_dir / "true_wind_trajectory.gif"
+            if gif_path.exists():
+                st.image(str(gif_path), caption="true_wind_trajectory.gif", use_container_width=True)
+            st.caption(f"输出目录：{out_dir}")
 
     with tab_artifacts:
         result_dirs = list_result_dirs()
